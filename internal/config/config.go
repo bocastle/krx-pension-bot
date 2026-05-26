@@ -21,8 +21,8 @@ type Config struct {
 	TelegramBotToken      string
 	TelegramWebhookSecret string
 	PublicBaseURL         string
-	CacheTTL             time.Duration
-	KRXBaseURL           string
+	CacheTTL              time.Duration
+	KRXBaseURL            string
 }
 
 func Load() (Config, error) {
@@ -31,8 +31,8 @@ func Load() (Config, error) {
 		TelegramBotToken:      strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
 		TelegramWebhookSecret: strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
 		PublicBaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("PUBLIC_BASE_URL")), "/"),
-		CacheTTL:             cacheTTL(),
-		KRXBaseURL:           strings.TrimRight(getenv("KRX_BASE_URL", defaultKRXBaseURL), "/"),
+		CacheTTL:              cacheTTL(),
+		KRXBaseURL:            strings.TrimRight(getenv("KRX_BASE_URL", defaultKRXBaseURL), "/"),
 	}
 
 	if cfg.TelegramBotToken == "" {

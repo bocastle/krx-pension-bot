@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	jsonPath              = "/comm/bldAttendant/getJsonData.cmd"
+	jsonPath             = "/comm/bldAttendant/getJsonData.cmd"
 	netBuyByInvestorBLD  = "dbms/MDC/STAT/standard/MDCSTAT02401"
 	pensionInvestorCode  = "6000"
 	defaultClientTimeout = 10 * time.Second

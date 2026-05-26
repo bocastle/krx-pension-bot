@@ -44,6 +44,30 @@
 
 `CACHE_TTL_MINUTES`는 무료 서버 운영을 고려해 5~30분 범위로 사용하는 것을 권장합니다.
 
+## 로컬 실행
+
+```bash
+cp .env.example .env
+```
+
+`.env`에 Telegram 토큰과 webhook secret을 채운 뒤 실행합니다.
+
+```bash
+go run ./cmd/bot
+```
+
+서버가 뜨면 상태 확인 엔드포인트를 호출합니다.
+
+```bash
+curl http://localhost:8080/healthz
+```
+
+테스트는 다음 명령으로 실행합니다.
+
+```bash
+go test ./...
+```
+
 ## 배포
 
 ### Telegram BotFather
