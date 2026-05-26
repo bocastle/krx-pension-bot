@@ -16,25 +16,34 @@ import (
 
 const (
 	jsonPath             = "/comm/bldAttendant/getJsonData.cmd"
+	naverFrontAPIPath    = "/front-api/domestic/stock/list"
 	marketTickerBLD      = "dbms/MDC_OUT/EASY/ranking/MDCEASY01601_OUT"
 	netBuyByInvestorBLD  = "dbms/MDC_OUT/STAT/standard/MDCSTAT02401_OUT"
+	naverStockBaseURL    = "https://m.stock.naver.com"
 	pensionInvestorCode  = "6000"
 	defaultClientTimeout = 10 * time.Second
+	afterHoursMaxPages   = 5
+	afterHoursPageSize   = 50
 )
 
 type Client struct {
 	baseURL     string
+	naverURL    string
 	http        *http.Client
 	flowCache   *cache.Cache[string, []report.Flow]
 	tickerCache *cache.Cache[string, []report.Ticker]
+	afterCache  *cache.Cache[string, []report.AfterHoursStock]
 }
 
 func NewClient(baseURL string, ttl time.Duration) *Client {
+	baseURL = strings.TrimRight(baseURL, "/")
 	return &Client{
-		baseURL:     strings.TrimRight(baseURL, "/"),
+		baseURL:     baseURL,
+		naverURL:    defaultNaverURL(baseURL),
 		http:        &http.Client{Timeout: defaultClientTimeout},
 		flowCache:   cache.New[string, []report.Flow](ttl, time.Now),
 		tickerCache: cache.New[string, []report.Ticker](ttl, time.Now),
+		afterCache:  cache.New[string, []report.AfterHoursStock](ttl, time.Now),
 	}
 }
 
@@ -143,6 +152,82 @@ func (c *Client) MarketTickers(ctx context.Context, market report.Market, date t
 	return rows, nil
 }
 
+func (c *Client) AfterHoursGainers(ctx context.Context, market report.Market) ([]report.AfterHoursStock, error) {
+	key := fmt.Sprintf("after-hours:%s", market)
+	if rows, ok := c.afterCache.Get(key); ok {
+		return rows, nil
+	}
+
+	rowsByCode := make(map[string]report.AfterHoursStock)
+	for page := 1; page <= afterHoursMaxPages; page++ {
+		values := url.Values{}
+		values.Set("sortType", "up")
+		values.Set("category", afterHoursCategory(market))
+		values.Set("domesticStockExchangeType", "KRX")
+		values.Set("page", strconv.Itoa(page))
+		values.Set("pageSize", strconv.Itoa(afterHoursPageSize))
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.naverURL+naverFrontAPIPath+"?"+values.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Referer", "https://m.stock.naver.com/domestic/home/upper/"+afterHoursCategory(market))
+		req.Header.Set("User-Agent", "Mozilla/5.0")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			resp.Body.Close()
+			return nil, fmt.Errorf("naver stock request failed: status %d", resp.StatusCode)
+		}
+
+		var payload naverAfterHoursPayload
+		err = json.NewDecoder(resp.Body).Decode(&payload)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		rows := parseAfterHoursRows(payload.Result.Stocks)
+		for _, row := range rows {
+			rowsByCode[row.Code] = row
+		}
+		if len(payload.Result.Stocks) < afterHoursPageSize {
+			break
+		}
+	}
+
+	rows := make([]report.AfterHoursStock, 0, len(rowsByCode))
+	for _, row := range rowsByCode {
+		rows = append(rows, row)
+	}
+	c.afterCache.Set(key, rows)
+	return rows, nil
+}
+
+type naverAfterHoursPayload struct {
+	Result struct {
+		Stocks []naverAfterHoursRow `json:"stocks"`
+	} `json:"result"`
+}
+
+type naverAfterHoursRow struct {
+	Code                string                    `json:"itemCode"`
+	Name                string                    `json:"name"`
+	OverMarketPriceInfo *naverOverMarketPriceInfo `json:"overMarketPriceInfo"`
+}
+
+type naverOverMarketPriceInfo struct {
+	TradingSessionType string `json:"tradingSessionType"`
+	OverPrice          string `json:"overPrice"`
+	Fluctuations       string `json:"fluctuations"`
+	FluctuationsRatio  string `json:"fluctuationsRatio"`
+}
+
 func marketCode(market report.Market) string {
 	switch market {
 	case report.MarketKOSDAQ:
@@ -150,6 +235,22 @@ func marketCode(market report.Market) string {
 	default:
 		return "STK"
 	}
+}
+
+func afterHoursCategory(market report.Market) string {
+	switch market {
+	case report.MarketKOSDAQ:
+		return "KOSDAQ"
+	default:
+		return "KOSPI"
+	}
+}
+
+func defaultNaverURL(baseURL string) string {
+	if strings.Contains(baseURL, "data.krx.co.kr") {
+		return naverStockBaseURL
+	}
+	return baseURL
 }
 
 func parseRowsPayload(raw json.RawMessage) []report.Flow {
@@ -206,6 +307,26 @@ func parseTickerRows(raw []map[string]string) []report.Ticker {
 			TradeValue:   parseNumber(pick(item, "ACC_TRDVAL", "ACC_TRD_VAL")),
 			ChangeRate:   parseDecimal(pick(item, "FLUC_RT", "FLUCT_RT")),
 			ClosingPrice: parseNumber(pick(item, "TDD_CLSPRC", "CLSPRC")),
+		}
+		if row.Code != "" || row.Name != "" {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+func parseAfterHoursRows(raw []naverAfterHoursRow) []report.AfterHoursStock {
+	rows := make([]report.AfterHoursStock, 0, len(raw))
+	for _, item := range raw {
+		if item.OverMarketPriceInfo == nil || item.OverMarketPriceInfo.TradingSessionType != "AFTER_MARKET" {
+			continue
+		}
+		row := report.AfterHoursStock{
+			Code:            strings.TrimSpace(item.Code),
+			Name:            strings.TrimSpace(item.Name),
+			AfterPrice:      parseNumber(item.OverMarketPriceInfo.OverPrice),
+			AfterChange:     parseNumber(item.OverMarketPriceInfo.Fluctuations),
+			AfterChangeRate: parseDecimal(item.OverMarketPriceInfo.FluctuationsRatio),
 		}
 		if row.Code != "" || row.Name != "" {
 			rows = append(rows, row)

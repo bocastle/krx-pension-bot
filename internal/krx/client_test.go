@@ -145,3 +145,59 @@ func TestClientTreatsStringOutputAsEmptyRows(t *testing.T) {
 		t.Fatalf("len(rows) = %d, want 0", len(rows))
 	}
 }
+
+func TestClientFetchesAndParsesAfterHoursGainers(t *testing.T) {
+	var requestPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.String()
+		if r.URL.Path != "/front-api/domestic/stock/list" {
+			t.Fatalf("path = %s, want Naver stock list endpoint", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("sortType"); got != "up" {
+			t.Fatalf("sortType = %q, want up", got)
+		}
+		if got := r.URL.Query().Get("category"); got != "KOSPI" {
+			t.Fatalf("category = %q, want KOSPI", got)
+		}
+		if got := r.URL.Query().Get("domesticStockExchangeType"); got != "KRX" {
+			t.Fatalf("domesticStockExchangeType = %q, want KRX", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"isSuccess": true,
+			"result": {
+				"stocks": [
+					{
+						"itemCode": "011070",
+						"name": "LG이노텍",
+						"overMarketPriceInfo": {
+							"tradingSessionType": "AFTER_MARKET",
+							"overPrice": "1,123,000",
+							"fluctuations": "259,000",
+							"fluctuationsType": "RISING",
+							"fluctuationsRatio": "29.98"
+						}
+					},
+					{
+						"itemCode": "005930",
+						"name": "삼성전자"
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, 10*time.Minute)
+	rows, err := client.AfterHoursGainers(context.Background(), report.MarketKOSPI)
+	if err != nil {
+		t.Fatalf("AfterHoursGainers() error = %v", err)
+	}
+
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1, path=%s", len(rows), requestPath)
+	}
+	if rows[0].Code != "011070" || rows[0].Name != "LG이노텍" || rows[0].AfterPrice != 1_123_000 || rows[0].AfterChangeRate != 29.98 {
+		t.Fatalf("row = %#v", rows[0])
+	}
+}

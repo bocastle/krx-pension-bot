@@ -10,6 +10,7 @@ import (
 type fakeSource struct {
 	rows          map[Market][]Flow
 	tickers       map[Market][]Ticker
+	afterHours    map[Market][]AfterHoursStock
 	rowsByEnd     map[string]map[Market][]Flow
 	tickersByDate map[string]map[Market][]Ticker
 }
@@ -26,6 +27,10 @@ func (f fakeSource) MarketTickers(ctx context.Context, market Market, date time.
 		return f.tickersByDate[date.Format("20060102")][market], nil
 	}
 	return f.tickers[market], nil
+}
+
+func (f fakeSource) AfterHoursGainers(ctx context.Context, market Market) ([]AfterHoursStock, error) {
+	return f.afterHours[market], nil
 }
 
 func TestPensionReportShowsBothMarketsAndDisclaimer(t *testing.T) {
@@ -346,6 +351,29 @@ func TestInterestReportCombinesTradingValueAndPensionFlow(t *testing.T) {
 	for _, want := range []string{"관심 종목", "거래대금", "연기금등 순매수", "삼성전자"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("interest report missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestAfterHoursReportShowsBothMarkets(t *testing.T) {
+	svc := NewService(fakeSource{afterHours: map[Market][]AfterHoursStock{
+		MarketKOSPI: {
+			{Code: "011070", Name: "LG이노텍", AfterPrice: 1_123_000, AfterChange: 259_000, AfterChangeRate: 29.98},
+			{Code: "005930", Name: "삼성전자", AfterPrice: 85_000, AfterChange: 1_000, AfterChangeRate: 1.19},
+		},
+		MarketKOSDAQ: {
+			{Code: "356680", Name: "엑스게이트", AfterPrice: 27_550, AfterChange: 6_350, AfterChangeRate: 29.95},
+		},
+	}}, time.FixedZone("KST", 9*60*60))
+
+	msg, err := svc.AfterHoursReport(context.Background(), 10, time.Date(2026, 5, 26, 18, 10, 0, 0, time.FixedZone("KST", 9*60*60)))
+	if err != nil {
+		t.Fatalf("AfterHoursReport() error = %v", err)
+	}
+
+	for _, want := range []string{"시간외 급등", "KOSPI", "KOSDAQ", "LG이노텍(011070) +29.98%", "시간외가: 1,123,000원", "네이버페이 증권"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("after-hours report missing %q:\n%s", want, msg)
 		}
 	}
 }

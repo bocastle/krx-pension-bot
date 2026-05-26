@@ -52,6 +52,8 @@ func (s *Service) HandleText(ctx context.Context, text string) (string, error) {
 		return s.TradingValueReport(ctx, cmd.Period, cmd.Limit, now)
 	case CommandFlowTop:
 		return s.FlowTopReport(ctx, cmd.Period, cmd.Limit, now)
+	case CommandAfterHours:
+		return s.AfterHoursReport(ctx, cmd.Limit, now)
 	default:
 		return unknownMessage(), nil
 	}
@@ -172,6 +174,27 @@ func (s *Service) InterestReport(ctx context.Context, period Period, limit int, 
 		appendFlowTopItems(&b, "연기금등 순매수", data.Rows[market], tickersByCode(tickers[market]), min(limit, 5))
 		b.WriteString("\n")
 	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func (s *Service) AfterHoursReport(ctx context.Context, limit int, now time.Time) (string, error) {
+	rowsByMarket := make(map[Market][]AfterHoursStock, 2)
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		rows, err := s.source.AfterHoursGainers(ctx, market)
+		if err != nil {
+			return "", fmt.Errorf("시간외 급등 데이터 조회 실패: %w", err)
+		}
+		rowsByMarket[market] = rows
+	}
+
+	var b strings.Builder
+	b.WriteString("시간외 급등 리포트\n")
+	fmt.Fprintf(&b, "조회 시각: %s\n\n", now.In(s.loc).Format("2006-01-02 15:04"))
+	b.WriteString("네이버페이 증권 공개 시세의 KRX 시간외 가격 기준입니다.\n\n")
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		appendAfterHoursMarketReport(&b, market, rowsByMarket[market], limit)
+	}
+	b.WriteString("시간외 단일가는 정규장 종가 대비 변동률 기준이며, 장중에는 지연되거나 변동될 수 있습니다.")
 	return strings.TrimSpace(b.String()), nil
 }
 
@@ -509,6 +532,35 @@ func appendFlowTopItems(b *strings.Builder, title string, rows []Flow, tickers m
 	}
 }
 
+func appendAfterHoursMarketReport(b *strings.Builder, market Market, rows []AfterHoursStock, limit int) {
+	fmt.Fprintf(b, "[%s]\n", market)
+	fmt.Fprintf(b, "시간외 급등 TOP %d\n", limit)
+	if len(rows) == 0 {
+		b.WriteString("- 없음\n\n")
+		return
+	}
+	sorted := append([]AfterHoursStock(nil), rows...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].AfterChangeRate > sorted[j].AfterChangeRate
+	})
+	count := 0
+	for _, row := range sorted {
+		if row.AfterChangeRate <= 0 {
+			continue
+		}
+		count++
+		fmt.Fprintf(b, "%d. %s(%s) %+.2f%%\n", count, row.Name, row.Code, row.AfterChangeRate)
+		fmt.Fprintf(b, "   시간외가: %s원 / 대비: %s원\n", formatUnsignedInt(row.AfterPrice), formatInt(row.AfterChange))
+		if count >= limit {
+			break
+		}
+	}
+	if count == 0 {
+		b.WriteString("- 없음\n")
+	}
+	b.WriteString("\n")
+}
+
 func formatStockReport(market Market, row Flow, query QueryPeriod, fallback bool, tickers map[string]Ticker) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s(%s) 연기금등 수급 (%s)\n", row.Name, row.Code, query.Label)
@@ -619,6 +671,17 @@ func formatInt(value int64) string {
 	return sign + digits
 }
 
+func formatUnsignedInt(value int64) string {
+	if value < 0 {
+		value = -value
+	}
+	digits := fmt.Sprintf("%d", value)
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return digits
+}
+
 func dateOnly(t time.Time) time.Time {
 	year, month, day := t.Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
@@ -660,6 +723,8 @@ func helpMessage() string {
 /관심 오늘
 /거래대금 오늘
 /수급상위 오늘
+/시간외 급등
+/시간외 급등 20
 /종목 005930
 /종목 삼성전자
 /종목 삼전
@@ -678,6 +743,7 @@ func helpMessage() string {
 /pension today 20
 /stock 005930
 /stock 005930 20d
+/afterhours up
 
 조회 결과는 투자 참고용이며 매매 추천이 아닙니다.`)
 }

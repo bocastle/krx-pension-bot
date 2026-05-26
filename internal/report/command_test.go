@@ -35,6 +35,10 @@ func TestParseCommand(t *testing.T) {
 		{"/거래대금 오늘 20", Command{Kind: CommandTradingValue, Period: PeriodToday, Limit: 20}},
 		{"/수급상위 오늘", Command{Kind: CommandFlowTop, Period: PeriodToday, Limit: 10}},
 		{"/수급상위 오늘 20", Command{Kind: CommandFlowTop, Period: PeriodToday, Limit: 20}},
+		{"/시간외 급등", Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: 10}},
+		{"/시간외 오늘", Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: 10}},
+		{"/시간외 20", Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: 20}},
+		{"/afterhours up", Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: 10}},
 	}
 
 	for _, tt := range tests {

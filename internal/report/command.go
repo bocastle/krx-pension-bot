@@ -42,6 +42,8 @@ func ParseCommand(text string) Command {
 		return parseMarketRanking(fields[1:], CommandTradingValue)
 	case "/수급상위":
 		return parseMarketRanking(fields[1:], CommandFlowTop)
+	case "/시간외", "/afterhours":
+		return parseAfterHours(fields[1:])
 	}
 	return Command{Kind: CommandUnknown}
 }
@@ -101,6 +103,34 @@ func parseMarketRanking(args []string, kind CommandKind) Command {
 		limit = parsed
 	}
 	return Command{Kind: kind, Period: period, Limit: limit}
+}
+
+func parseAfterHours(args []string) Command {
+	if len(args) < 1 || len(args) > 2 {
+		return Command{Kind: CommandUnknown}
+	}
+
+	limit := 10
+	switch strings.ToLower(args[0]) {
+	case "급등", "오늘", "up", "gainers":
+	case "":
+		return Command{Kind: CommandUnknown}
+	default:
+		parsed, err := strconv.Atoi(args[0])
+		if err != nil || parsed < 1 || parsed > 50 || len(args) != 1 {
+			return Command{Kind: CommandUnknown}
+		}
+		return Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: parsed}
+	}
+
+	if len(args) == 2 {
+		parsed, err := strconv.Atoi(args[1])
+		if err != nil || parsed < 1 || parsed > 50 {
+			return Command{Kind: CommandUnknown}
+		}
+		limit = parsed
+	}
+	return Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: limit}
 }
 
 func stockCommand(query string, period Period) Command {

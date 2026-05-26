@@ -32,6 +32,7 @@ const (
 	CommandInterest
 	CommandTradingValue
 	CommandFlowTop
+	CommandAfterHours
 )
 
 type Command struct {
@@ -62,6 +63,14 @@ type Ticker struct {
 	ClosingPrice int64
 }
 
+type AfterHoursStock struct {
+	Code            string
+	Name            string
+	AfterPrice      int64
+	AfterChange     int64
+	AfterChangeRate float64
+}
+
 type QueryPeriod struct {
 	Start time.Time
 	End   time.Time
@@ -71,4 +80,5 @@ type QueryPeriod struct {
 type Source interface {
 	MarketFlows(ctx context.Context, market Market, period QueryPeriod) ([]Flow, error)
 	MarketTickers(ctx context.Context, market Market, date time.Time) ([]Ticker, error)
+	AfterHoursGainers(ctx context.Context, market Market) ([]AfterHoursStock, error)
 }
