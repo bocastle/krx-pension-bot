@@ -31,6 +31,7 @@ func TestLoadReadsEnvironmentAndClampsCacheTTL(t *testing.T) {
 }
 
 func TestLoadRequiresTelegramToken(t *testing.T) {
+	t.Chdir(t.TempDir())
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "secret")
 

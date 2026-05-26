@@ -107,3 +107,27 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
 - 거래대금 대비 연기금등 순매수 비중 추가
 - 종목별 기간 비교 리포트 강화
 - 텔레그램 이미지 차트 리포트 추가
+
+## Render 무료 배포와 주기적 상태 확인
+
+Render Free Web Service는 일정 시간 요청이 없으면 sleep 상태로 전환될 수 있습니다. 이 저장소에는 10분마다 `/healthz`를 호출하는 GitHub Actions 워크플로가 포함되어 있습니다.
+
+Render 배포 후 생성된 서비스 URL을 GitHub 저장소 변수에 등록합니다.
+
+```text
+Settings > Secrets and variables > Actions > Variables > New repository variable
+```
+
+변수 이름은 다음과 같이 설정합니다.
+
+```text
+RENDER_HEALTH_URL
+```
+
+값은 Render 서비스의 health check URL로 설정합니다.
+
+```text
+https://<render-service-name>.onrender.com/healthz
+```
+
+워크플로는 `.github/workflows/render-health-ping.yml`에 있으며, `RENDER_HEALTH_URL`이 비어 있으면 아무 작업도 하지 않고 종료합니다. Render 배포가 끝난 뒤 이 변수를 설정하면 다음 스케줄부터 10분마다 health check 요청을 보냅니다.
