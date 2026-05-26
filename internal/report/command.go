@@ -91,6 +91,8 @@ func parsePeriod(raw string) (Period, bool) {
 		return PeriodToday, true
 	case "5d", "5일":
 		return Period5D, true
+	case "10d", "10일":
+		return Period10D, true
 	case "20d", "20일":
 		return Period20D, true
 	default:

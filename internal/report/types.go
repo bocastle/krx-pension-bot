@@ -17,6 +17,7 @@ type Period string
 const (
 	PeriodToday Period = "today"
 	Period5D    Period = "5d"
+	Period10D   Period = "10d"
 	Period20D   Period = "20d"
 )
 

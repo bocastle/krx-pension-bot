@@ -103,6 +103,8 @@ func BuildQueryPeriod(period Period, now time.Time) QueryPeriod {
 	switch period {
 	case Period5D:
 		return QueryPeriod{Start: businessDaysBefore(end, 4), End: end, Label: "최근 5거래일"}
+	case Period10D:
+		return QueryPeriod{Start: businessDaysBefore(end, 9), End: end, Label: "최근 10거래일"}
 	case Period20D:
 		return QueryPeriod{Start: businessDaysBefore(end, 19), End: end, Label: "최근 20거래일"}
 	default:
@@ -226,16 +228,19 @@ func helpMessage() string {
 	return strings.TrimSpace(`사용 가능한 명령어
 /연기금 오늘
 /연기금 5일
+/연기금 10일
 /연기금 20일
 /연기금 오늘 20
 /종목 005930
 /종목 삼성전자
+/종목 005930 10일
 /종목 005930 20일
 삼성전자
 
 영문 명령어도 사용할 수 있습니다.
 /pension today
 /pension 5d
+/pension 10d
 /pension 20d
 /pension today 20
 /stock 005930

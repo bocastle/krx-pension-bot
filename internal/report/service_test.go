@@ -81,3 +81,13 @@ func TestStockReportFindsNameAcrossMarkets(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildQueryPeriodSupports10TradingDays(t *testing.T) {
+	got := BuildQueryPeriod(Period10D, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
+	if got.Label != "최근 10거래일" {
+		t.Fatalf("Label = %q, want 최근 10거래일", got.Label)
+	}
+	if got.Start.Format("2006-01-02") != "2026-05-13" {
+		t.Fatalf("Start = %s, want 2026-05-13", got.Start.Format("2006-01-02"))
+	}
+}
