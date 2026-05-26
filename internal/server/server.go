@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"os"
@@ -32,6 +33,10 @@ func NewHandler(secret string, responder telegram.Responder, diagnostic Diagnost
 			http.Error(w, "diagnostic unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		if secret != "" && !sameSecret(r.Header.Get("X-Debug-Secret"), secret) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		count, err := diagnostic.CheckKOSPI(r.Context())
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if err != nil {
@@ -55,4 +60,11 @@ func renderCommitSuffix() string {
 		commit = commit[:7]
 	}
 	return " " + commit
+}
+
+func sameSecret(got, want string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }

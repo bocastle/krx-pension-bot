@@ -39,12 +39,28 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-func TestDebugKrx(t *testing.T) {
+func TestDebugKrxRejectsMissingSecret(t *testing.T) {
 	handler := NewHandler("secret", fakeResponder{}, fakeDiagnostic{}, func(ctx context.Context, chatID int64, text string) error {
 		return nil
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/debug/krx", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestDebugKrxAllowsMatchingSecret(t *testing.T) {
+	handler := NewHandler("secret", fakeResponder{}, fakeDiagnostic{}, func(ctx context.Context, chatID int64, text string) error {
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/krx", nil)
+	req.Header.Set("X-Debug-Secret", "secret")
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)

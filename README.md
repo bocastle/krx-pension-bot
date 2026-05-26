@@ -1,6 +1,6 @@
-# KRX Pension Bot
+# KRX 주식 봇
 
-한국거래소(KRX)의 투자자별 매매 동향 중 `연기금등` 수급을 텔레그램 명령어로 조회하는 경량 Go 봇입니다.
+한국거래소(KRX)의 투자자별 매매 동향을 텔레그램 명령어로 조회하는 경량 Go 봇입니다. 현재 MVP는 `연기금등` 수급 리포트를 중심으로 제공합니다.
 
 이 프로젝트에서 말하는 `연기금등`은 국민연금 단독 매매가 아니라, KRX 투자자 분류상 `연기금등`으로 집계되는 수급 데이터입니다. 조회 결과는 투자 참고용이며 매매 추천이 아닙니다.
 
@@ -9,7 +9,7 @@
 - 텔레그램 명령어 기반 수급 조회
 - KOSPI / KOSDAQ 시장별 연기금등 순매수, 순매도 리포트
 - 종목 코드별 연기금등 수급 조회
-- Koyeb Web Service 배포를 전제로 한 webhook 방식
+- Render Web Service 배포를 전제로 한 webhook 방식
 - 5~30분 메모리 캐시로 KRX 요청 부담 완화
 - 텍스트 리포트 우선 제공
 
@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | BotFather에서 발급받은 봇 토큰 | `123456:ABC...` |
 | `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook 요청 검증용 secret | `change-me` |
-| `PUBLIC_BASE_URL` | Koyeb 서비스의 공개 URL | `https://krx-pension-bot.example.koyeb.app` |
+| `PUBLIC_BASE_URL` | Render 서비스의 공개 URL | `https://krx-pension-bot.onrender.com` |
 | `CACHE_TTL_MINUTES` | KRX 응답 캐시 시간 | `10` |
 
 `CACHE_TTL_MINUTES`는 무료 서버 운영을 고려해 5~30분 범위로 사용하는 것을 권장합니다.
@@ -85,9 +85,9 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
   -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
-### Koyeb
+### Render
 
-1. GitHub 저장소를 Koyeb Web Service로 연결합니다.
+1. GitHub 저장소를 Render Web Service로 연결합니다.
 2. Dockerfile 기반 배포를 선택합니다.
 3. 필요한 환경변수를 설정합니다.
 4. 배포 후 `/healthz`가 정상 응답하는지 확인합니다.

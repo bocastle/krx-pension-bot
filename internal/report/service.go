@@ -141,8 +141,8 @@ func formatStockReport(market Market, row Flow, query QueryPeriod) string {
 		query.Label,
 		market,
 		formatWon(row.NetValue),
-		formatWon(row.BuyValue),
-		formatWon(row.SellValue),
+		formatUnsignedWon(row.BuyValue),
+		formatUnsignedWon(row.SellValue),
 		formatInt(row.NetVolume),
 	)
 }
@@ -157,6 +157,13 @@ func formatWon(value int64) string {
 		value = -value
 	}
 	return fmt.Sprintf("%s%.1f억원", sign, float64(value)/100_000_000)
+}
+
+func formatUnsignedWon(value int64) string {
+	if value < 0 {
+		value = -value
+	}
+	return fmt.Sprintf("%.1f억원", float64(value)/100_000_000)
 }
 
 func formatInt(value int64) string {
@@ -193,7 +200,7 @@ func businessDaysBefore(end time.Time, daysBefore int) time.Time {
 }
 
 func startMessage() string {
-	return "KRX 연기금등 수급 리포트 봇입니다.\n/help 명령어로 사용법을 확인하세요.\n\n연기금등은 국민연금 단독 매매가 아니라 KRX 투자자 분류상 연기금등 집계입니다."
+	return "KRX 주식 봇입니다.\n현재는 KRX 연기금등 수급 리포트를 제공합니다.\n/help 명령어로 사용법을 확인하세요.\n\n연기금등은 국민연금 단독 매매가 아니라 KRX 투자자 분류상 연기금등 집계입니다."
 }
 
 func helpMessage() string {

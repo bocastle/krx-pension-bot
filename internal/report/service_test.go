@@ -52,9 +52,12 @@ func TestStockReportFindsCodeAcrossMarkets(t *testing.T) {
 		t.Fatalf("StockReport() error = %v", err)
 	}
 
-	for _, want := range []string{"005930", "삼성전자", "KOSPI", "+123.0억원", "최근 20거래일"} {
+	for _, want := range []string{"005930", "삼성전자", "KOSPI", "+123.0억원", "최근 20거래일", "매수: 200.0억원 / 매도: 77.0억원"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("stock report missing %q:\n%s", want, msg)
 		}
+	}
+	if strings.Contains(msg, "매수: +") || strings.Contains(msg, "매도: +") {
+		t.Fatalf("stock report should not sign gross buy/sell values:\n%s", msg)
 	}
 }
