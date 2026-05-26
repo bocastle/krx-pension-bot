@@ -71,16 +71,26 @@ func (s *Service) PensionReport(ctx context.Context, period Period, limit int, n
 
 func (s *Service) StockReport(ctx context.Context, code string, period Period, now time.Time) (string, error) {
 	query := BuildQueryPeriod(period, now.In(s.loc))
+	matches := make([]stockMatch, 0)
 	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
 		rows, err := s.source.MarketFlows(ctx, market, query)
 		if err != nil {
 			return "", err
 		}
 		for _, row := range rows {
-			if stockMatches(row, code) {
-				return formatStockReport(market, row, query), nil
+			if score, ok := stockMatchScore(row, code); ok {
+				matches = append(matches, stockMatch{Market: market, Row: row, Score: score})
 			}
 		}
+	}
+	if len(matches) == 1 || hasSingleBestMatch(matches) {
+		sort.SliceStable(matches, func(i, j int) bool {
+			return matches[i].Score < matches[j].Score
+		})
+		return formatStockReport(matches[0].Market, matches[0].Row, query), nil
+	}
+	if len(matches) > 1 {
+		return formatAmbiguousStockMatches(code, matches, query), nil
 	}
 	return fmt.Sprintf("%s 종목을 %s 연기금등 수급 데이터에서 찾지 못했습니다.", code, query.Label), nil
 }
@@ -146,16 +156,91 @@ func (c Command) StockQuery() string {
 	return c.Code
 }
 
-func stockMatches(row Flow, query string) bool {
-	normalizedQuery := normalizeStockQuery(query)
-	if normalizedQuery == "" {
-		return false
-	}
-	return normalizeStockQuery(row.Code) == normalizedQuery || normalizeStockQuery(row.Name) == normalizedQuery
+func normalizeStockQuery(value string) string {
+	replacer := strings.NewReplacer(" ", "", ".", "", "-", "", "_", "", "(", "", ")", "")
+	return strings.ToLower(replacer.Replace(value))
 }
 
-func normalizeStockQuery(value string) string {
-	return strings.ToLower(strings.Join(strings.Fields(value), ""))
+type stockMatch struct {
+	Market Market
+	Row    Flow
+	Score  int
+}
+
+func stockMatchScore(row Flow, query string) (int, bool) {
+	normalizedQuery := normalizeStockQuery(query)
+	if normalizedQuery == "" {
+		return 0, false
+	}
+	code := normalizeStockQuery(row.Code)
+	name := normalizeStockQuery(row.Name)
+	if code == normalizedQuery || name == normalizedQuery {
+		return 0, true
+	}
+	for _, alias := range stockAliases[name] {
+		if normalizeStockQuery(alias) == normalizedQuery {
+			return 1, true
+		}
+	}
+	if len([]rune(normalizedQuery)) >= 2 && strings.Contains(name, normalizedQuery) {
+		return 2, true
+	}
+	return 0, false
+}
+
+var stockAliases = map[string][]string{
+	"삼성전자":      {"삼전", "삼성전자보통주"},
+	"sk하이닉스":    {"하이닉스", "하닉", "skhynix", "sk hynix"},
+	"lg에너지솔루션":  {"엘지에너지솔루션", "lg엔솔", "엘지엔솔", "엔솔"},
+	"lg전자":      {"엘지전자"},
+	"lg화학":      {"엘지화학"},
+	"lg이노텍":     {"엘지이노텍"},
+	"현대차":       {"현차", "현대자동차"},
+	"기아":        {"기아차"},
+	"naver":     {"네이버"},
+	"셀트리온":      {"셀트"},
+	"한화에어로스페이스": {"한화에어로"},
+}
+
+func hasSingleBestMatch(matches []stockMatch) bool {
+	if len(matches) == 0 {
+		return false
+	}
+	best := matches[0].Score
+	for _, match := range matches[1:] {
+		if match.Score < best {
+			best = match.Score
+		}
+	}
+	count := 0
+	for _, match := range matches {
+		if match.Score == best {
+			count++
+		}
+	}
+	return count == 1 && best < 2
+}
+
+func formatAmbiguousStockMatches(query string, matches []stockMatch, period QueryPeriod) string {
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].Score != matches[j].Score {
+			return matches[i].Score < matches[j].Score
+		}
+		return matches[i].Row.NetValue > matches[j].Row.NetValue
+	})
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%q 검색 결과가 여러 종목에 해당합니다. 종목명이나 코드를 더 구체적으로 입력해 주세요.\n", query)
+	fmt.Fprintf(&b, "기준: %s\n\n", period.Label)
+	limit := min(len(matches), 10)
+	for i := 0; i < limit; i++ {
+		row := matches[i].Row
+		fmt.Fprintf(&b, "%d. %s(%s) %s\n", i+1, row.Name, row.Code, formatWon(row.NetValue))
+	}
+	if limit > 0 {
+		fmt.Fprintf(&b, "\n예: /종목 %s", matches[0].Row.Code)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func min(a, b int) int {
@@ -397,6 +482,8 @@ func helpMessage() string {
 /수급상위 오늘
 /종목 005930
 /종목 삼성전자
+/종목 삼전
+/종목 하이닉스
 /종목 005930 10일
 /종목 005930 20일
 삼성전자

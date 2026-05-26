@@ -87,6 +87,60 @@ func TestStockReportFindsNameAcrossMarkets(t *testing.T) {
 	}
 }
 
+func TestStockReportFindsCommonAliases(t *testing.T) {
+	svc := NewService(fakeSource{rows: map[Market][]Flow{
+		MarketKOSPI: {
+			{Code: "005930", Name: "삼성전자", NetValue: 12_300_000_000},
+			{Code: "000660", Name: "SK하이닉스", NetValue: 7_000_000_000},
+		},
+		MarketKOSDAQ: {},
+	}}, time.FixedZone("KST", 9*60*60))
+
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{"삼전", "삼성전자(005930)"},
+		{"하이닉스", "SK하이닉스(000660)"},
+		{"sk hynix", "SK하이닉스(000660)"},
+	}
+
+	for _, tt := range tests {
+		msg, err := svc.StockReport(context.Background(), tt.query, PeriodToday, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
+		if err != nil {
+			t.Fatalf("StockReport(%q) error = %v", tt.query, err)
+		}
+		if !strings.Contains(msg, tt.want) {
+			t.Fatalf("StockReport(%q) missing %q:\n%s", tt.query, tt.want, msg)
+		}
+	}
+}
+
+func TestStockReportShowsCandidatesForAmbiguousName(t *testing.T) {
+	svc := NewService(fakeSource{rows: map[Market][]Flow{
+		MarketKOSPI: {
+			{Code: "005930", Name: "삼성전자", NetValue: 12_300_000_000},
+			{Code: "006400", Name: "삼성SDI", NetValue: 7_000_000_000},
+			{Code: "018260", Name: "삼성에스디에스", NetValue: 2_000_000_000},
+		},
+		MarketKOSDAQ: {},
+	}}, time.FixedZone("KST", 9*60*60))
+
+	msg, err := svc.StockReport(context.Background(), "삼성", PeriodToday, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("StockReport() error = %v", err)
+	}
+
+	for _, want := range []string{"여러 종목", "삼성전자(005930)", "삼성SDI(006400)", "/종목 005930"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("ambiguous report missing %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "순매수 금액") {
+		t.Fatalf("ambiguous report should not return a single stock report:\n%s", msg)
+	}
+}
+
 func TestBuildQueryPeriodSupports10TradingDays(t *testing.T) {
 	got := BuildQueryPeriod(Period10D, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
 	if got.Label != "최근 10거래일" {
