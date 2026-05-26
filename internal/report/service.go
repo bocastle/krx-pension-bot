@@ -37,6 +37,15 @@ func (s *Service) HandleText(ctx context.Context, text string) (string, error) {
 	}
 }
 
+func (s *Service) CheckKOSPI(ctx context.Context) (int, error) {
+	query := BuildQueryPeriod(PeriodToday, time.Now().In(s.loc))
+	rows, err := s.source.MarketFlows(ctx, MarketKOSPI, query)
+	if err != nil {
+		return 0, err
+	}
+	return len(rows), nil
+}
+
 func (s *Service) PensionReport(ctx context.Context, period Period, limit int, now time.Time) (string, error) {
 	query := BuildQueryPeriod(period, now.In(s.loc))
 	var b strings.Builder

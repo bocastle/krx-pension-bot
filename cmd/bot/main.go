@@ -26,7 +26,7 @@ func main() {
 	source := krx.NewClient(cfg.KRXBaseURL, cfg.CacheTTL)
 	reports := report.NewService(source, kst)
 	bot := telegram.NewClient(cfg.TelegramBotToken, "", nil)
-	handler := server.NewHandler(cfg.TelegramWebhookSecret, reports, bot.SendMessage)
+	handler := server.NewHandler(cfg.TelegramWebhookSecret, reports, reports, bot.SendMessage)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,
