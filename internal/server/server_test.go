@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,7 @@ func (fakeResponder) HandleText(ctx context.Context, text string) (string, error
 }
 
 func TestHealthz(t *testing.T) {
+	t.Setenv("RENDER_GIT_COMMIT", "d953cc5abcdef123456")
 	handler := NewHandler("secret", fakeResponder{}, func(ctx context.Context, chatID int64, text string) error {
 		return nil
 	})
@@ -26,7 +28,7 @@ func TestHealthz(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if rec.Body.String() != "ok\n" {
-		t.Fatalf("body = %q, want ok", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "d953cc5") {
+		t.Fatalf("body = %q, want short render commit", rec.Body.String())
 	}
 }
