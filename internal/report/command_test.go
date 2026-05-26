@@ -39,6 +39,18 @@ func TestParseCommand(t *testing.T) {
 		{"/시간외 오늘", Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: 10}},
 		{"/시간외 20", Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: 20}},
 		{"/afterhours up", Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: 10}},
+		{"/신호 오늘", Command{Kind: CommandSignal, Period: PeriodToday, Limit: 10}},
+		{"/신호 오늘 20", Command{Kind: CommandSignal, Period: PeriodToday, Limit: 20}},
+		{"/신호 삼성전자", Command{Kind: CommandSignal, Query: "삼성전자", Period: PeriodToday}},
+		{"/신호 005930", Command{Kind: CommandSignal, Code: "005930", Period: PeriodToday}},
+		{"/신호 SK 하이닉스", Command{Kind: CommandSignal, Query: "SK 하이닉스", Period: PeriodToday}},
+		{"/signal today", Command{Kind: CommandSignal, Period: PeriodToday, Limit: 10}},
+		{"/signal 005930", Command{Kind: CommandSignal, Code: "005930", Period: PeriodToday}},
+		{"/오전실적 오늘", Command{Kind: CommandMorningPerformance, Period: PeriodToday, Limit: 10}},
+		{"/오전실적 오늘 20", Command{Kind: CommandMorningPerformance, Period: PeriodToday, Limit: 20}},
+		{"/오후실적 오늘", Command{Kind: CommandAfternoonPerformance, Period: PeriodToday, Limit: 10}},
+		{"/morning today", Command{Kind: CommandMorningPerformance, Period: PeriodToday, Limit: 10}},
+		{"/afternoon today", Command{Kind: CommandAfternoonPerformance, Period: PeriodToday, Limit: 10}},
 	}
 
 	for _, tt := range tests {

@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,22 +20,28 @@ import (
 const (
 	jsonPath             = "/comm/bldAttendant/getJsonData.cmd"
 	naverFrontAPIPath    = "/front-api/domestic/stock/list"
+	naverIntradayPath    = "/siseJson.naver"
 	marketTickerBLD      = "dbms/MDC_OUT/EASY/ranking/MDCEASY01601_OUT"
 	netBuyByInvestorBLD  = "dbms/MDC_OUT/STAT/standard/MDCSTAT02401_OUT"
 	naverStockBaseURL    = "https://m.stock.naver.com"
+	naverFinanceBaseURL  = "https://api.finance.naver.com"
 	pensionInvestorCode  = "6000"
 	defaultClientTimeout = 10 * time.Second
 	afterHoursMaxPages   = 5
 	afterHoursPageSize   = 50
 )
 
+var intradayRowPattern = regexp.MustCompile(`\["(\d{12})",\s*null,\s*null,\s*null,\s*([0-9,-]+),\s*([0-9,-]+),\s*null\]`)
+
 type Client struct {
 	baseURL     string
 	naverURL    string
+	financeURL  string
 	http        *http.Client
 	flowCache   *cache.Cache[string, []report.Flow]
 	tickerCache *cache.Cache[string, []report.Ticker]
 	afterCache  *cache.Cache[string, []report.AfterHoursStock]
+	dayCache    *cache.Cache[string, []report.IntradayPrice]
 }
 
 func NewClient(baseURL string, ttl time.Duration) *Client {
@@ -40,10 +49,12 @@ func NewClient(baseURL string, ttl time.Duration) *Client {
 	return &Client{
 		baseURL:     baseURL,
 		naverURL:    defaultNaverURL(baseURL),
+		financeURL:  defaultFinanceURL(baseURL),
 		http:        &http.Client{Timeout: defaultClientTimeout},
 		flowCache:   cache.New[string, []report.Flow](ttl, time.Now),
 		tickerCache: cache.New[string, []report.Ticker](ttl, time.Now),
 		afterCache:  cache.New[string, []report.AfterHoursStock](ttl, time.Now),
+		dayCache:    cache.New[string, []report.IntradayPrice](ttl, time.Now),
 	}
 }
 
@@ -209,6 +220,46 @@ func (c *Client) AfterHoursGainers(ctx context.Context, market report.Market) ([
 	return rows, nil
 }
 
+func (c *Client) IntradayPrices(ctx context.Context, code string, date time.Time) ([]report.IntradayPrice, error) {
+	key := fmt.Sprintf("intraday:%s:%s", code, date.Format("20060102"))
+	if rows, ok := c.dayCache.Get(key); ok {
+		return rows, nil
+	}
+
+	values := url.Values{}
+	values.Set("symbol", code)
+	values.Set("requestType", "1")
+	values.Set("startTime", date.Format("20060102"))
+	values.Set("endTime", date.Format("20060102"))
+	values.Set("timeframe", "minute")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.financeURL+naverIntradayPath+"?"+values.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/plain, */*")
+	req.Header.Set("Referer", "https://finance.naver.com/item/fchart.naver?code="+code)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("naver intraday request failed: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	rows := parseIntradayRows(string(body), date.Location())
+	c.dayCache.Set(key, rows)
+	return rows, nil
+}
+
 type naverAfterHoursPayload struct {
 	Result struct {
 		Stocks []naverAfterHoursRow `json:"stocks"`
@@ -249,6 +300,13 @@ func afterHoursCategory(market report.Market) string {
 func defaultNaverURL(baseURL string) string {
 	if strings.Contains(baseURL, "data.krx.co.kr") {
 		return naverStockBaseURL
+	}
+	return baseURL
+}
+
+func defaultFinanceURL(baseURL string) string {
+	if strings.Contains(baseURL, "data.krx.co.kr") {
+		return naverFinanceBaseURL
 	}
 	return baseURL
 }
@@ -332,6 +390,32 @@ func parseAfterHoursRows(raw []naverAfterHoursRow) []report.AfterHoursStock {
 			rows = append(rows, row)
 		}
 	}
+	return rows
+}
+
+func parseIntradayRows(raw string, loc *time.Location) []report.IntradayPrice {
+	if loc == nil {
+		loc = time.Local
+	}
+	matches := intradayRowPattern.FindAllStringSubmatch(raw, -1)
+	rows := make([]report.IntradayPrice, 0, len(matches))
+	for _, match := range matches {
+		timestamp, err := time.ParseInLocation("200601021504", match[1], loc)
+		if err != nil {
+			continue
+		}
+		row := report.IntradayPrice{
+			Time:   timestamp,
+			Close:  parseNumber(match[2]),
+			Volume: parseNumber(match[3]),
+		}
+		if row.Close > 0 {
+			rows = append(rows, row)
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rows[i].Time.Before(rows[j].Time)
+	})
 	return rows
 }
 

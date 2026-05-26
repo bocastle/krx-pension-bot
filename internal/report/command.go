@@ -44,6 +44,12 @@ func ParseCommand(text string) Command {
 		return parseMarketRanking(fields[1:], CommandFlowTop)
 	case "/시간외", "/afterhours":
 		return parseAfterHours(fields[1:])
+	case "/신호", "/signal":
+		return parseSignal(fields[1:])
+	case "/오전실적", "/morning":
+		return parseSessionPerformance(fields[1:], CommandMorningPerformance)
+	case "/오후실적", "/afternoon":
+		return parseSessionPerformance(fields[1:], CommandAfternoonPerformance)
 	}
 	return Command{Kind: CommandUnknown}
 }
@@ -131,6 +137,55 @@ func parseAfterHours(args []string) Command {
 		limit = parsed
 	}
 	return Command{Kind: CommandAfterHours, Period: PeriodToday, Limit: limit}
+}
+
+func parseSignal(args []string) Command {
+	if len(args) < 1 {
+		return Command{Kind: CommandUnknown}
+	}
+	if period, ok := parsePeriod(args[0]); ok {
+		if len(args) > 2 {
+			return Command{Kind: CommandUnknown}
+		}
+		if period != PeriodToday {
+			return Command{Kind: CommandUnknown}
+		}
+		limit := 10
+		if len(args) == 2 {
+			parsed, err := strconv.Atoi(args[1])
+			if err != nil || parsed < 1 || parsed > 50 {
+				return Command{Kind: CommandUnknown}
+			}
+			limit = parsed
+		}
+		return Command{Kind: CommandSignal, Period: PeriodToday, Limit: limit}
+	}
+	query := strings.TrimSpace(strings.Join(args, " "))
+	if query == "" {
+		return Command{Kind: CommandUnknown}
+	}
+	cmd := stockCommand(query, PeriodToday)
+	cmd.Kind = CommandSignal
+	return cmd
+}
+
+func parseSessionPerformance(args []string, kind CommandKind) Command {
+	if len(args) < 1 || len(args) > 2 {
+		return Command{Kind: CommandUnknown}
+	}
+	period, ok := parsePeriod(args[0])
+	if !ok || period != PeriodToday {
+		return Command{Kind: CommandUnknown}
+	}
+	limit := 10
+	if len(args) == 2 {
+		parsed, err := strconv.Atoi(args[1])
+		if err != nil || parsed < 1 || parsed > 20 {
+			return Command{Kind: CommandUnknown}
+		}
+		limit = parsed
+	}
+	return Command{Kind: kind, Period: PeriodToday, Limit: limit}
 }
 
 func stockCommand(query string, period Period) Command {

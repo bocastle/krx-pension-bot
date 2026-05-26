@@ -201,3 +201,43 @@ func TestClientFetchesAndParsesAfterHoursGainers(t *testing.T) {
 		t.Fatalf("row = %#v", rows[0])
 	}
 }
+
+func TestClientFetchesAndParsesIntradayPrices(t *testing.T) {
+	var requestPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.String()
+		if r.URL.Path != "/siseJson.naver" {
+			t.Fatalf("path = %s, want Naver intraday endpoint", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("symbol"); got != "005930" {
+			t.Fatalf("symbol = %q, want 005930", got)
+		}
+		if got := r.URL.Query().Get("timeframe"); got != "minute" {
+			t.Fatalf("timeframe = %q, want minute", got)
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		_, _ = w.Write([]byte(`
+ [['날짜', '시가', '고가', '저가', '종가', '거래량', '외국인소진율'],
+["202605261130", null, null, null, 103000, 2000, null],
+["202605260900", null, null, null, 100000, 1000, null]
+]
+`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, 10*time.Minute)
+	rows, err := client.IntradayPrices(context.Background(), "005930", time.Date(2026, 5, 26, 0, 0, 0, 0, time.FixedZone("KST", 9*60*60)))
+	if err != nil {
+		t.Fatalf("IntradayPrices() error = %v", err)
+	}
+
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2, path=%s", len(rows), requestPath)
+	}
+	if rows[0].Time.Format("200601021504") != "202605260900" || rows[0].Close != 100_000 || rows[0].Volume != 1_000 {
+		t.Fatalf("first row = %#v", rows[0])
+	}
+	if rows[1].Time.Format("200601021504") != "202605261130" || rows[1].Close != 103_000 || rows[1].Volume != 2_000 {
+		t.Fatalf("second row = %#v", rows[1])
+	}
+}

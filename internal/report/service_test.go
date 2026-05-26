@@ -11,6 +11,7 @@ type fakeSource struct {
 	rows          map[Market][]Flow
 	tickers       map[Market][]Ticker
 	afterHours    map[Market][]AfterHoursStock
+	intraday      map[string][]IntradayPrice
 	rowsByEnd     map[string]map[Market][]Flow
 	tickersByDate map[string]map[Market][]Ticker
 }
@@ -31,6 +32,10 @@ func (f fakeSource) MarketTickers(ctx context.Context, market Market, date time.
 
 func (f fakeSource) AfterHoursGainers(ctx context.Context, market Market) ([]AfterHoursStock, error) {
 	return f.afterHours[market], nil
+}
+
+func (f fakeSource) IntradayPrices(ctx context.Context, code string, date time.Time) ([]IntradayPrice, error) {
+	return f.intraday[code], nil
 }
 
 func TestPensionReportShowsBothMarketsAndDisclaimer(t *testing.T) {
@@ -374,6 +379,116 @@ func TestAfterHoursReportShowsBothMarkets(t *testing.T) {
 	for _, want := range []string{"시간외 급등", "KOSPI", "KOSDAQ", "LG이노텍(011070) +29.98%", "시간외가: 1,123,000원", "네이버페이 증권"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("after-hours report missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestSignalReportRanksByCompositeSignal(t *testing.T) {
+	svc := NewService(fakeSource{
+		rows: map[Market][]Flow{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", NetValue: 12_000_000_000},
+				{Code: "000660", Name: "SK하이닉스", NetValue: 3_000_000_000},
+			},
+			MarketKOSDAQ: {},
+		},
+		tickers: map[Market][]Ticker{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", TradeValue: 200_000_000_000, ChangeRate: 2.4},
+				{Code: "000660", Name: "SK하이닉스", TradeValue: 100_000_000_000, ChangeRate: -1.2},
+			},
+			MarketKOSDAQ: {},
+		},
+		afterHours: map[Market][]AfterHoursStock{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", AfterChangeRate: 1.5},
+			},
+			MarketKOSDAQ: {},
+		},
+	}, time.FixedZone("KST", 9*60*60))
+
+	msg, err := svc.SignalReport(context.Background(), PeriodToday, 10, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("SignalReport() error = %v", err)
+	}
+
+	for _, want := range []string{"관심 신호", "KOSPI", "삼성전자(005930)", "점", "거래대금 대비 +6.00%", "시간외 +1.50%", "매매 추천이 아닙니다"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("signal report missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestSignalStockReportFindsName(t *testing.T) {
+	svc := NewService(fakeSource{
+		rows: map[Market][]Flow{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", NetValue: 12_000_000_000},
+			},
+			MarketKOSDAQ: {},
+		},
+		tickers: map[Market][]Ticker{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", TradeValue: 200_000_000_000, ChangeRate: 2.4},
+			},
+			MarketKOSDAQ: {},
+		},
+	}, time.FixedZone("KST", 9*60*60))
+
+	msg, err := svc.SignalStockReport(context.Background(), "삼성전자", time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("SignalStockReport() error = %v", err)
+	}
+
+	for _, want := range []string{"삼성전자(005930) 관심 신호", "KOSPI", "점수", "연기금등"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("signal stock report missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestSessionPerformanceReportUsesIntradayPrices(t *testing.T) {
+	loc := time.FixedZone("KST", 9*60*60)
+	date := time.Date(2026, 5, 26, 0, 0, 0, 0, loc)
+	svc := NewService(fakeSource{
+		rows: map[Market][]Flow{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", NetValue: 12_000_000_000},
+				{Code: "000660", Name: "SK하이닉스", NetValue: 3_000_000_000},
+			},
+			MarketKOSDAQ: {},
+		},
+		tickers: map[Market][]Ticker{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", TradeValue: 200_000_000_000, ChangeRate: 2.4},
+				{Code: "000660", Name: "SK하이닉스", TradeValue: 100_000_000_000, ChangeRate: 1.0},
+			},
+			MarketKOSDAQ: {},
+		},
+		intraday: map[string][]IntradayPrice{
+			"005930": {
+				{Time: date.Add(9 * time.Hour), Close: 100_000},
+				{Time: date.Add(11*time.Hour + 30*time.Minute), Close: 103_000},
+				{Time: date.Add(12 * time.Hour), Close: 102_000},
+				{Time: date.Add(15*time.Hour + 30*time.Minute), Close: 101_000},
+			},
+			"000660": {
+				{Time: date.Add(9 * time.Hour), Close: 200_000},
+				{Time: date.Add(11*time.Hour + 30*time.Minute), Close: 198_000},
+				{Time: date.Add(12 * time.Hour), Close: 198_000},
+				{Time: date.Add(15*time.Hour + 30*time.Minute), Close: 202_000},
+			},
+		},
+	}, loc)
+
+	msg, err := svc.SessionPerformanceReport(context.Background(), SessionMorning, PeriodToday, 10, date.Add(16*time.Hour))
+	if err != nil {
+		t.Fatalf("SessionPerformanceReport() error = %v", err)
+	}
+
+	for _, want := range []string{"오전 실적", "09:00 -> 11:30", "삼성전자(005930) +3.00%", "100,000원 -> 103,000원", "가격 기준"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("session report missing %q:\n%s", want, msg)
 		}
 	}
 }

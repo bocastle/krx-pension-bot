@@ -27,6 +27,39 @@ type tickerDataResult struct {
 	Fallback bool
 }
 
+type signalDataResult struct {
+	Query    QueryPeriod
+	Rows     map[Market][]signalCandidate
+	Fallback bool
+}
+
+type signalCandidate struct {
+	Market   Market
+	Flow     Flow
+	Ticker   Ticker
+	HasPrice bool
+	After    AfterHoursStock
+	HasAfter bool
+	Score    float64
+	Reasons  []string
+	Ratio    float64
+	HasRatio bool
+}
+
+type sessionWindowRange struct {
+	Start      time.Time
+	End        time.Time
+	StartLabel string
+	EndLabel   string
+}
+
+type sessionPerformance struct {
+	Candidate signalCandidate
+	Start     IntradayPrice
+	End       IntradayPrice
+	Rate      float64
+}
+
 func NewService(source Source, loc *time.Location) *Service {
 	if loc == nil {
 		loc = time.FixedZone("KST", 9*60*60)
@@ -54,6 +87,15 @@ func (s *Service) HandleText(ctx context.Context, text string) (string, error) {
 		return s.FlowTopReport(ctx, cmd.Period, cmd.Limit, now)
 	case CommandAfterHours:
 		return s.AfterHoursReport(ctx, cmd.Limit, now)
+	case CommandSignal:
+		if cmd.StockQuery() != "" {
+			return s.SignalStockReport(ctx, cmd.StockQuery(), now)
+		}
+		return s.SignalReport(ctx, cmd.Period, cmd.Limit, now)
+	case CommandMorningPerformance:
+		return s.SessionPerformanceReport(ctx, SessionMorning, cmd.Period, cmd.Limit, now)
+	case CommandAfternoonPerformance:
+		return s.SessionPerformanceReport(ctx, SessionAfternoon, cmd.Period, cmd.Limit, now)
 	default:
 		return unknownMessage(), nil
 	}
@@ -198,6 +240,105 @@ func (s *Service) AfterHoursReport(ctx context.Context, limit int, now time.Time
 	return strings.TrimSpace(b.String()), nil
 }
 
+func (s *Service) SignalReport(ctx context.Context, period Period, limit int, now time.Time) (string, error) {
+	data, err := s.buildSignalCandidates(ctx, period, now)
+	if err != nil {
+		return "", err
+	}
+	if !hasAnySignal(data.Rows) {
+		return noDataMessage("관심 신호 리포트", data.Query), nil
+	}
+
+	var b strings.Builder
+	appendReportHeader(&b, "관심 신호 리포트", data.Query, data.Fallback)
+	b.WriteString("점수는 연기금등 순매수, 거래대금 대비 비중, 거래대금, 당일 등락률, 시간외 가격을 합산한 참고 신호입니다.\n\n")
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		appendSignalMarketReport(&b, market, data.Rows[market], limit)
+	}
+	b.WriteString("조회 결과는 투자 참고용이며 매매 추천이 아닙니다.")
+	return strings.TrimSpace(b.String()), nil
+}
+
+func (s *Service) SignalStockReport(ctx context.Context, query string, now time.Time) (string, error) {
+	data, err := s.buildSignalCandidates(ctx, PeriodToday, now)
+	if err != nil {
+		return "", err
+	}
+
+	matches := make([]signalCandidate, 0)
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		for _, candidate := range data.Rows[market] {
+			if _, ok := stockMatchScore(candidate.Flow, query); ok {
+				matches = append(matches, candidate)
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return fmt.Sprintf("%s 종목은 %s 관심 신호 데이터에서 찾지 못했습니다.", query, data.Query.Label), nil
+	}
+	sortSignalCandidates(matches)
+	best := matches[0]
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s(%s) 관심 신호 (%s)\n", best.Flow.Name, best.Flow.Code, data.Query.Label)
+	fmt.Fprintf(&b, "기준일: %s", data.Query.End.Format("2006-01-02"))
+	if data.Fallback {
+		b.WriteString(" (최근 조회 가능 거래일)")
+	}
+	fmt.Fprintf(&b, "\n시장: %s\n", best.Market)
+	fmt.Fprintf(&b, "점수: %.1f점\n", best.Score)
+	appendSignalDetail(&b, best)
+	b.WriteString("\n점수는 참고 신호이며 매매 추천이 아닙니다.")
+	return strings.TrimSpace(b.String()), nil
+}
+
+func (s *Service) SessionPerformanceReport(ctx context.Context, session Session, period Period, limit int, now time.Time) (string, error) {
+	data, err := s.buildSignalCandidates(ctx, period, now)
+	if err != nil {
+		return "", err
+	}
+	candidates := flattenSignalCandidates(data.Rows)
+	if len(candidates) == 0 {
+		return noDataMessage(sessionTitle(session)+" 실적 리포트", data.Query), nil
+	}
+	sortSignalCandidates(candidates)
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	window := sessionWindow(session, data.Query.End, s.loc)
+	performances := make([]sessionPerformance, 0, len(candidates))
+	for _, candidate := range candidates {
+		prices, err := s.source.IntradayPrices(ctx, candidate.Flow.Code, data.Query.End)
+		if err != nil {
+			continue
+		}
+		perf, ok := calculateSessionPerformance(candidate, prices, window)
+		if ok {
+			performances = append(performances, perf)
+		}
+	}
+	sort.SliceStable(performances, func(i, j int) bool {
+		return performances[i].Rate > performances[j].Rate
+	})
+
+	var b strings.Builder
+	appendReportHeader(&b, sessionTitle(session)+" 실적 리포트", data.Query, data.Fallback)
+	fmt.Fprintf(&b, "대상: 관심 신호 상위 %d종목\n", len(candidates))
+	fmt.Fprintf(&b, "가격 기준: %s -> %s\n\n", window.StartLabel, window.EndLabel)
+	if len(performances) == 0 {
+		b.WriteString("분봉 가격 데이터가 없어 실적을 계산하지 못했습니다.\n\n")
+	} else {
+		for i, perf := range performances {
+			fmt.Fprintf(&b, "%d. %s(%s) %+.2f%%\n", i+1, perf.Candidate.Flow.Name, perf.Candidate.Flow.Code, perf.Rate)
+			fmt.Fprintf(&b, "   %s원 -> %s원\n", formatUnsignedInt(perf.Start.Close), formatUnsignedInt(perf.End.Close))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("오전/오후 실적은 연기금등 시간대별 수급이 아니라 분봉 가격 기준입니다.")
+	return strings.TrimSpace(b.String()), nil
+}
+
 func (s *Service) loadFlowData(ctx context.Context, period Period, now time.Time) (flowDataResult, error) {
 	originalEnd := dateOnly(now.In(s.loc))
 	end := originalEnd
@@ -236,6 +377,48 @@ func (s *Service) loadTickerData(ctx context.Context, period Period, now time.Ti
 	return last, nil
 }
 
+func (s *Service) buildSignalCandidates(ctx context.Context, period Period, now time.Time) (signalDataResult, error) {
+	flowData, err := s.loadFlowData(ctx, period, now)
+	result := signalDataResult{
+		Query:    flowData.Query,
+		Rows:     make(map[Market][]signalCandidate, 2),
+		Fallback: flowData.Fallback,
+	}
+	if err != nil {
+		return result, err
+	}
+	if !hasAnyFlow(flowData.Rows) {
+		return result, nil
+	}
+
+	tickers, _ := s.fetchTickers(ctx, flowData.Query.End)
+	afterHours := make(map[Market]map[string]AfterHoursStock, 2)
+	if shouldUseAfterHours(flowData.Query.End, now.In(s.loc)) {
+		for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+			afterRows, err := s.source.AfterHoursGainers(ctx, market)
+			if err != nil {
+				continue
+			}
+			afterHours[market] = afterHoursByCode(afterRows)
+		}
+	}
+
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		tickerMap := tickersByCode(tickers[market])
+		for _, row := range flowData.Rows[market] {
+			if row.NetValue <= 0 {
+				continue
+			}
+			ticker, hasTicker := tickerMap[row.Code]
+			after, hasAfter := afterHours[market][row.Code]
+			candidate := scoreSignalCandidate(market, row, ticker, hasTicker, after, hasAfter)
+			result.Rows[market] = append(result.Rows[market], candidate)
+		}
+		sortSignalCandidates(result.Rows[market])
+	}
+	return result, nil
+}
+
 func (s *Service) fetchFlows(ctx context.Context, query QueryPeriod) (map[Market][]Flow, error) {
 	rows := make(map[Market][]Flow, 2)
 	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
@@ -270,6 +453,15 @@ func hasAnyFlow(rows map[Market][]Flow) bool {
 }
 
 func hasAnyTicker(rows map[Market][]Ticker) bool {
+	for _, marketRows := range rows {
+		if len(marketRows) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnySignal(rows map[Market][]signalCandidate) bool {
 	for _, marketRows := range rows {
 		if len(marketRows) > 0 {
 			return true
@@ -389,6 +581,13 @@ func formatAmbiguousStockMatches(query string, matches []stockMatch, period Quer
 }
 
 func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func minFloat(a, b float64) float64 {
 	if a < b {
 		return a
 	}
@@ -561,6 +760,198 @@ func appendAfterHoursMarketReport(b *strings.Builder, market Market, rows []Afte
 	b.WriteString("\n")
 }
 
+func appendSignalMarketReport(b *strings.Builder, market Market, rows []signalCandidate, limit int) {
+	fmt.Fprintf(b, "[%s]\n", market)
+	fmt.Fprintf(b, "관심 신호 TOP %d\n", limit)
+	if len(rows) == 0 {
+		b.WriteString("- 없음\n\n")
+		return
+	}
+	sorted := append([]signalCandidate(nil), rows...)
+	sortSignalCandidates(sorted)
+	for i := 0; i < min(limit, len(sorted)); i++ {
+		candidate := sorted[i]
+		fmt.Fprintf(b, "%d. %s(%s) %.1f점\n", i+1, candidate.Flow.Name, candidate.Flow.Code, candidate.Score)
+		appendSignalDetail(b, candidate)
+	}
+	b.WriteString("\n")
+}
+
+func appendSignalDetail(b *strings.Builder, candidate signalCandidate) {
+	fmt.Fprintf(b, "   연기금등: %s", formatWon(candidate.Flow.NetValue))
+	if candidate.HasRatio {
+		fmt.Fprintf(b, " / 거래대금 대비 %+.2f%%", candidate.Ratio)
+	}
+	if candidate.HasPrice {
+		fmt.Fprintf(b, " / 등락률 %+.2f%%", candidate.Ticker.ChangeRate)
+	}
+	if candidate.HasAfter {
+		fmt.Fprintf(b, " / 시간외 %+.2f%%", candidate.After.AfterChangeRate)
+	}
+	b.WriteString("\n")
+	if len(candidate.Reasons) > 0 {
+		fmt.Fprintf(b, "   신호: %s\n", strings.Join(candidate.Reasons, ", "))
+	}
+}
+
+func scoreSignalCandidate(market Market, row Flow, ticker Ticker, hasTicker bool, after AfterHoursStock, hasAfter bool) signalCandidate {
+	candidate := signalCandidate{
+		Market:   market,
+		Flow:     row,
+		Ticker:   ticker,
+		HasPrice: hasTicker,
+		After:    after,
+		HasAfter: hasAfter,
+	}
+	candidate.Score += minFloat(float64(row.NetValue)/10_000_000_000, 4)
+	candidate.Reasons = append(candidate.Reasons, "연기금등 순매수")
+
+	if hasTicker {
+		if ratio, ok := flowRatio(row, map[string]Ticker{row.Code: ticker}); ok {
+			candidate.Ratio = ratio
+			candidate.HasRatio = true
+			switch {
+			case ratio >= 5:
+				candidate.Score += 3
+				candidate.Reasons = append(candidate.Reasons, "수급 비중 높음")
+			case ratio >= 2:
+				candidate.Score += 2
+				candidate.Reasons = append(candidate.Reasons, "수급 비중 양호")
+			case ratio >= 1:
+				candidate.Score++
+				candidate.Reasons = append(candidate.Reasons, "수급 비중 확인")
+			}
+		}
+		switch {
+		case ticker.TradeValue >= 1_000_000_000_000:
+			candidate.Score += 2
+			candidate.Reasons = append(candidate.Reasons, "거래대금 매우 활발")
+		case ticker.TradeValue >= 300_000_000_000:
+			candidate.Score++
+			candidate.Reasons = append(candidate.Reasons, "거래대금 활발")
+		}
+		switch {
+		case ticker.ChangeRate >= 3:
+			candidate.Score += 2
+			candidate.Reasons = append(candidate.Reasons, "주가 강세")
+		case ticker.ChangeRate > 0:
+			candidate.Score++
+			candidate.Reasons = append(candidate.Reasons, "주가 상승")
+		case ticker.ChangeRate < 0:
+			candidate.Score -= 0.5
+		}
+	}
+	if hasAfter && after.AfterChangeRate > 0 {
+		if after.AfterChangeRate >= 3 {
+			candidate.Score += 2
+			candidate.Reasons = append(candidate.Reasons, "시간외 강세")
+		} else {
+			candidate.Score++
+			candidate.Reasons = append(candidate.Reasons, "시간외 상승")
+		}
+	}
+	return candidate
+}
+
+func sortSignalCandidates(rows []signalCandidate) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Score != rows[j].Score {
+			return rows[i].Score > rows[j].Score
+		}
+		return rows[i].Flow.NetValue > rows[j].Flow.NetValue
+	})
+}
+
+func flattenSignalCandidates(rows map[Market][]signalCandidate) []signalCandidate {
+	candidates := make([]signalCandidate, 0)
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		candidates = append(candidates, rows[market]...)
+	}
+	return candidates
+}
+
+func afterHoursByCode(rows []AfterHoursStock) map[string]AfterHoursStock {
+	byCode := make(map[string]AfterHoursStock, len(rows))
+	for _, row := range rows {
+		byCode[row.Code] = row
+	}
+	return byCode
+}
+
+func shouldUseAfterHours(queryDate, now time.Time) bool {
+	if !sameDate(queryDate, now) {
+		return false
+	}
+	return now.Hour() > 15 || now.Hour() == 15 && now.Minute() >= 40
+}
+
+func calculateSessionPerformance(candidate signalCandidate, prices []IntradayPrice, window sessionWindowRange) (sessionPerformance, bool) {
+	if len(prices) == 0 {
+		return sessionPerformance{}, false
+	}
+	sorted := append([]IntradayPrice(nil), prices...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Time.Before(sorted[j].Time)
+	})
+
+	start, ok := firstPriceAtOrAfter(sorted, window.Start, window.End)
+	if !ok || start.Close <= 0 {
+		return sessionPerformance{}, false
+	}
+	end, ok := lastPriceAtOrBefore(sorted, start.Time, window.End)
+	if !ok || end.Close <= 0 {
+		return sessionPerformance{}, false
+	}
+	rate := (float64(end.Close) - float64(start.Close)) / float64(start.Close) * 100
+	return sessionPerformance{Candidate: candidate, Start: start, End: end, Rate: rate}, true
+}
+
+func firstPriceAtOrAfter(rows []IntradayPrice, start, end time.Time) (IntradayPrice, bool) {
+	for _, row := range rows {
+		if row.Time.Before(start) || row.Time.After(end) {
+			continue
+		}
+		return row, true
+	}
+	return IntradayPrice{}, false
+}
+
+func lastPriceAtOrBefore(rows []IntradayPrice, start, end time.Time) (IntradayPrice, bool) {
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if row.Time.Before(start) || row.Time.After(end) {
+			continue
+		}
+		return row, true
+	}
+	return IntradayPrice{}, false
+}
+
+func sessionWindow(session Session, date time.Time, loc *time.Location) sessionWindowRange {
+	day := dateOnly(date.In(loc))
+	if session == SessionAfternoon {
+		return sessionWindowRange{
+			Start:      day.Add(12 * time.Hour),
+			End:        day.Add(15*time.Hour + 30*time.Minute),
+			StartLabel: "12:00",
+			EndLabel:   "15:30",
+		}
+	}
+	return sessionWindowRange{
+		Start:      day.Add(9 * time.Hour),
+		End:        day.Add(11*time.Hour + 30*time.Minute),
+		StartLabel: "09:00",
+		EndLabel:   "11:30",
+	}
+}
+
+func sessionTitle(session Session) string {
+	if session == SessionAfternoon {
+		return "오후"
+	}
+	return "오전"
+}
+
 func formatStockReport(market Market, row Flow, query QueryPeriod, fallback bool, tickers map[string]Ticker) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s(%s) 연기금등 수급 (%s)\n", row.Name, row.Code, query.Label)
@@ -725,6 +1116,10 @@ func helpMessage() string {
 /수급상위 오늘
 /시간외 급등
 /시간외 급등 20
+/신호 오늘
+/신호 삼성전자
+/오전실적 오늘
+/오후실적 오늘
 /종목 005930
 /종목 삼성전자
 /종목 삼전
@@ -744,6 +1139,9 @@ func helpMessage() string {
 /stock 005930
 /stock 005930 20d
 /afterhours up
+/signal today
+/morning today
+/afternoon today
 
 조회 결과는 투자 참고용이며 매매 추천이 아닙니다.`)
 }
