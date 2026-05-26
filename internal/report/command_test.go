@@ -26,6 +26,8 @@ func TestParseCommand(t *testing.T) {
 		{"/종목 005930 20일", Command{Kind: CommandStock, Code: "005930", Period: Period20D}},
 		{"/종목 삼성전자", Command{Kind: CommandStock, Query: "삼성전자", Period: PeriodToday}},
 		{"/종목 삼성전자 20일", Command{Kind: CommandStock, Query: "삼성전자", Period: Period20D}},
+		{"/종목 sk hynix", Command{Kind: CommandStock, Query: "sk hynix", Period: PeriodToday}},
+		{"/종목 SK 하이닉스 20일", Command{Kind: CommandStock, Query: "SK 하이닉스", Period: Period20D}},
 		{"삼성전자", Command{Kind: CommandStock, Query: "삼성전자", Period: PeriodToday}},
 		{"/관심 오늘", Command{Kind: CommandInterest, Period: PeriodToday, Limit: 10}},
 		{"/관심 오늘 20", Command{Kind: CommandInterest, Period: PeriodToday, Limit: 20}},

@@ -66,20 +66,20 @@ func parsePension(args []string) Command {
 }
 
 func parseStock(args []string) Command {
-	if len(args) < 1 || len(args) > 2 {
-		return Command{Kind: CommandUnknown}
-	}
-	query := strings.TrimSpace(args[0])
-	if query == "" {
+	if len(args) < 1 {
 		return Command{Kind: CommandUnknown}
 	}
 	period := PeriodToday
-	if len(args) == 2 {
-		parsed, ok := parsePeriod(args[1])
-		if !ok {
-			return Command{Kind: CommandUnknown}
+	queryArgs := args
+	if len(args) >= 2 {
+		if parsed, ok := parsePeriod(args[len(args)-1]); ok {
+			period = parsed
+			queryArgs = args[:len(args)-1]
 		}
-		period = parsed
+	}
+	query := strings.TrimSpace(strings.Join(queryArgs, " "))
+	if query == "" {
+		return Command{Kind: CommandUnknown}
 	}
 	return stockCommand(query, period)
 }
