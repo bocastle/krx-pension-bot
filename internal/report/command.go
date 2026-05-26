@@ -20,17 +20,17 @@ func ParseCommand(text string) Command {
 	}
 
 	switch name {
-	case "/start":
+	case "/start", "/시작":
 		if len(fields) == 1 {
 			return Command{Kind: CommandStart}
 		}
-	case "/help":
+	case "/help", "/도움말":
 		if len(fields) == 1 {
 			return Command{Kind: CommandHelp}
 		}
-	case "/pension":
+	case "/pension", "/연기금":
 		return parsePension(fields[1:])
-	case "/stock":
+	case "/stock", "/종목":
 		return parseStock(fields[1:])
 	}
 	return Command{Kind: CommandUnknown}
@@ -76,11 +76,11 @@ func parseStock(args []string) Command {
 
 func parsePeriod(raw string) (Period, bool) {
 	switch strings.ToLower(raw) {
-	case "today":
+	case "today", "오늘":
 		return PeriodToday, true
-	case "5d":
+	case "5d", "5일":
 		return Period5D, true
-	case "20d":
+	case "20d", "20일":
 		return Period20D, true
 	default:
 		return "", false

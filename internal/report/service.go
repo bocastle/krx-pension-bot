@@ -205,6 +205,14 @@ func startMessage() string {
 
 func helpMessage() string {
 	return strings.TrimSpace(`사용 가능한 명령어
+/연기금 오늘
+/연기금 5일
+/연기금 20일
+/연기금 오늘 20
+/종목 005930
+/종목 005930 20일
+
+영문 명령어도 사용할 수 있습니다.
 /pension today
 /pension 5d
 /pension 20d
