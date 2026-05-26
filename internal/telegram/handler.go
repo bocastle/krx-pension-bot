@@ -51,7 +51,7 @@ func NewWebhookHandler(secret string, responder Responder, send SendMessageFunc)
 		reply, err := responder.HandleText(r.Context(), update.Message.Text)
 		if err != nil {
 			log.Printf("handle telegram message: %v", err)
-			reply = "요청을 처리하는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+			reply = "KRX 데이터를 조회하는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.\n계속 실패하면 /help로 명령어 형식을 확인해 주세요."
 		}
 		if err := send(r.Context(), update.Message.Chat.ID, reply); err != nil {
 			log.Printf("send telegram message: %v", err)

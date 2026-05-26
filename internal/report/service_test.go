@@ -8,15 +8,23 @@ import (
 )
 
 type fakeSource struct {
-	rows    map[Market][]Flow
-	tickers map[Market][]Ticker
+	rows          map[Market][]Flow
+	tickers       map[Market][]Ticker
+	rowsByEnd     map[string]map[Market][]Flow
+	tickersByDate map[string]map[Market][]Ticker
 }
 
 func (f fakeSource) MarketFlows(ctx context.Context, market Market, period QueryPeriod) ([]Flow, error) {
+	if f.rowsByEnd != nil {
+		return f.rowsByEnd[period.End.Format("20060102")][market], nil
+	}
 	return f.rows[market], nil
 }
 
 func (f fakeSource) MarketTickers(ctx context.Context, market Market, date time.Time) ([]Ticker, error) {
+	if f.tickersByDate != nil {
+		return f.tickersByDate[date.Format("20060102")][market], nil
+	}
 	return f.tickers[market], nil
 }
 
@@ -116,6 +124,37 @@ func TestStockReportFindsCommonAliases(t *testing.T) {
 	}
 }
 
+func TestStockReportFindsExpandedAliases(t *testing.T) {
+	svc := NewService(fakeSource{rows: map[Market][]Flow{
+		MarketKOSPI: {
+			{Code: "034020", Name: "두산에너빌리티", NetValue: 12_300_000_000},
+			{Code: "323410", Name: "카카오뱅크", NetValue: 7_000_000_000},
+		},
+		MarketKOSDAQ: {
+			{Code: "035900", Name: "JYP Ent.", NetValue: 3_000_000_000},
+		},
+	}}, time.FixedZone("KST", 9*60*60))
+
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{"두산에너", "두산에너빌리티(034020)"},
+		{"카뱅", "카카오뱅크(323410)"},
+		{"jyp", "JYP Ent.(035900)"},
+	}
+
+	for _, tt := range tests {
+		msg, err := svc.StockReport(context.Background(), tt.query, PeriodToday, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
+		if err != nil {
+			t.Fatalf("StockReport(%q) error = %v", tt.query, err)
+		}
+		if !strings.Contains(msg, tt.want) {
+			t.Fatalf("StockReport(%q) missing %q:\n%s", tt.query, tt.want, msg)
+		}
+	}
+}
+
 func TestStockReportShowsCandidatesForAmbiguousName(t *testing.T) {
 	svc := NewService(fakeSource{rows: map[Market][]Flow{
 		MarketKOSPI: {
@@ -141,6 +180,47 @@ func TestStockReportShowsCandidatesForAmbiguousName(t *testing.T) {
 	}
 }
 
+func TestPensionReportFallsBackToPreviousBusinessDayWhenTodayIsEmpty(t *testing.T) {
+	svc := NewService(fakeSource{rowsByEnd: map[string]map[Market][]Flow{
+		"20260526": {
+			MarketKOSPI:  {},
+			MarketKOSDAQ: {},
+		},
+		"20260525": {
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", NetValue: 12_300_000_000},
+			},
+			MarketKOSDAQ: {},
+		},
+	}}, time.FixedZone("KST", 9*60*60))
+
+	msg, err := svc.PensionReport(context.Background(), PeriodToday, 10, time.Date(2026, 5, 26, 10, 0, 0, 0, time.FixedZone("KST", 9*60*60)))
+	if err != nil {
+		t.Fatalf("PensionReport() error = %v", err)
+	}
+
+	for _, want := range []string{"기준일: 2026-05-25", "최근 조회 가능 거래일", "삼성전자"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("fallback report missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestPensionReportShowsNoDataMessageAfterFallbackAttempts(t *testing.T) {
+	svc := NewService(fakeSource{}, time.FixedZone("KST", 9*60*60))
+
+	msg, err := svc.PensionReport(context.Background(), PeriodToday, 10, time.Date(2026, 5, 26, 10, 0, 0, 0, time.FixedZone("KST", 9*60*60)))
+	if err != nil {
+		t.Fatalf("PensionReport() error = %v", err)
+	}
+
+	for _, want := range []string{"최근 조회 가능한 KRX 데이터가 없습니다", "장전", "휴장일"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("no data report missing %q:\n%s", want, msg)
+		}
+	}
+}
+
 func TestBuildQueryPeriodSupports10TradingDays(t *testing.T) {
 	got := BuildQueryPeriod(Period10D, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
 	if got.Label != "최근 10거래일" {
@@ -148,6 +228,34 @@ func TestBuildQueryPeriodSupports10TradingDays(t *testing.T) {
 	}
 	if got.Start.Format("2006-01-02") != "2026-05-13" {
 		t.Fatalf("Start = %s, want 2026-05-13", got.Start.Format("2006-01-02"))
+	}
+}
+
+func TestFlowTopReportShowsTradingValueRatio(t *testing.T) {
+	svc := NewService(fakeSource{
+		rows: map[Market][]Flow{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", NetValue: 10_000_000_000},
+			},
+			MarketKOSDAQ: {},
+		},
+		tickers: map[Market][]Ticker{
+			MarketKOSPI: {
+				{Code: "005930", Name: "삼성전자", TradeValue: 200_000_000_000},
+			},
+			MarketKOSDAQ: {},
+		},
+	}, time.FixedZone("KST", 9*60*60))
+
+	msg, err := svc.FlowTopReport(context.Background(), PeriodToday, 10, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FlowTopReport() error = %v", err)
+	}
+
+	for _, want := range []string{"삼성전자", "거래대금 대비 +5.00%"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("flow top report missing %q:\n%s", want, msg)
+		}
 	}
 }
 
