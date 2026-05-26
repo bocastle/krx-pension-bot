@@ -27,6 +27,12 @@ func TestParseCommand(t *testing.T) {
 		{"/종목 삼성전자", Command{Kind: CommandStock, Query: "삼성전자", Period: PeriodToday}},
 		{"/종목 삼성전자 20일", Command{Kind: CommandStock, Query: "삼성전자", Period: Period20D}},
 		{"삼성전자", Command{Kind: CommandStock, Query: "삼성전자", Period: PeriodToday}},
+		{"/관심 오늘", Command{Kind: CommandInterest, Period: PeriodToday, Limit: 10}},
+		{"/관심 오늘 20", Command{Kind: CommandInterest, Period: PeriodToday, Limit: 20}},
+		{"/거래대금 오늘", Command{Kind: CommandTradingValue, Period: PeriodToday, Limit: 10}},
+		{"/거래대금 오늘 20", Command{Kind: CommandTradingValue, Period: PeriodToday, Limit: 20}},
+		{"/수급상위 오늘", Command{Kind: CommandFlowTop, Period: PeriodToday, Limit: 10}},
+		{"/수급상위 오늘 20", Command{Kind: CommandFlowTop, Period: PeriodToday, Limit: 20}},
 	}
 
 	for _, tt := range tests {

@@ -32,6 +32,12 @@ func (s *Service) HandleText(ctx context.Context, text string) (string, error) {
 		return s.PensionReport(ctx, cmd.Period, cmd.Limit, now)
 	case CommandStock:
 		return s.StockReport(ctx, cmd.StockQuery(), cmd.Period, now)
+	case CommandInterest:
+		return s.InterestReport(ctx, cmd.Period, cmd.Limit, now)
+	case CommandTradingValue:
+		return s.TradingValueReport(ctx, cmd.Period, cmd.Limit, now)
+	case CommandFlowTop:
+		return s.FlowTopReport(ctx, cmd.Period, cmd.Limit, now)
 	default:
 		return unknownMessage(), nil
 	}
@@ -79,6 +85,60 @@ func (s *Service) StockReport(ctx context.Context, code string, period Period, n
 	return fmt.Sprintf("%s 종목을 %s 연기금등 수급 데이터에서 찾지 못했습니다.", code, query.Label), nil
 }
 
+func (s *Service) TradingValueReport(ctx context.Context, period Period, limit int, now time.Time) (string, error) {
+	query := BuildQueryPeriod(period, now.In(s.loc))
+	var b strings.Builder
+	fmt.Fprintf(&b, "거래대금 상위 리포트 (%s)\n", query.Label)
+	fmt.Fprintf(&b, "기준일: %s\n\n", query.End.Format("2006-01-02"))
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		rows, err := s.source.MarketTickers(ctx, market, query.End)
+		if err != nil {
+			return "", err
+		}
+		appendTradingValueRanking(&b, market, rows, limit)
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func (s *Service) FlowTopReport(ctx context.Context, period Period, limit int, now time.Time) (string, error) {
+	query := BuildQueryPeriod(period, now.In(s.loc))
+	var b strings.Builder
+	fmt.Fprintf(&b, "연기금등 순매수 상위 리포트 (%s)\n", query.Label)
+	fmt.Fprintf(&b, "기준일: %s\n\n", query.End.Format("2006-01-02"))
+	b.WriteString("연기금등은 국민연금 단독 매매가 아니라 KRX 투자자 분류상 연기금등 집계입니다.\n\n")
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		rows, err := s.source.MarketFlows(ctx, market, query)
+		if err != nil {
+			return "", err
+		}
+		appendFlowTopRanking(&b, market, rows, limit)
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func (s *Service) InterestReport(ctx context.Context, period Period, limit int, now time.Time) (string, error) {
+	query := BuildQueryPeriod(period, now.In(s.loc))
+	var b strings.Builder
+	fmt.Fprintf(&b, "관심 종목 리포트 (%s)\n", query.Label)
+	fmt.Fprintf(&b, "기준일: %s\n\n", query.End.Format("2006-01-02"))
+	b.WriteString("거래대금 상위와 연기금등 순매수 상위를 함께 보여줍니다.\n\n")
+	for _, market := range []Market{MarketKOSPI, MarketKOSDAQ} {
+		tickers, err := s.source.MarketTickers(ctx, market, query.End)
+		if err != nil {
+			return "", err
+		}
+		flows, err := s.source.MarketFlows(ctx, market, query)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "[%s]\n", market)
+		appendTradingValueItems(&b, "거래대금", tickers, min(limit, 5))
+		appendFlowTopItems(&b, "연기금등 순매수", flows, min(limit, 5))
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
 func (c Command) StockQuery() string {
 	if c.Query != "" {
 		return c.Query
@@ -96,6 +156,13 @@ func stockMatches(row Flow, query string) bool {
 
 func normalizeStockQuery(value string) string {
 	return strings.ToLower(strings.Join(strings.Fields(value), ""))
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func BuildQueryPeriod(period Period, now time.Time) QueryPeriod {
@@ -141,6 +208,70 @@ func appendRanking(b *strings.Builder, title string, rows []Flow, limit int, pos
 			continue
 		}
 		if !positive && row.NetValue >= 0 {
+			continue
+		}
+		count++
+		fmt.Fprintf(b, "%d. %s(%s) %s\n", count, row.Name, row.Code, formatWon(row.NetValue))
+		if count >= limit {
+			break
+		}
+	}
+	if count == 0 {
+		b.WriteString("- 없음\n")
+	}
+}
+
+func appendTradingValueRanking(b *strings.Builder, market Market, rows []Ticker, limit int) {
+	fmt.Fprintf(b, "[%s]\n", market)
+	appendTradingValueItems(b, fmt.Sprintf("거래대금 TOP %d", limit), rows, limit)
+	b.WriteString("\n")
+}
+
+func appendTradingValueItems(b *strings.Builder, title string, rows []Ticker, limit int) {
+	fmt.Fprintf(b, "%s\n", title)
+	if len(rows) == 0 {
+		b.WriteString("- 없음\n")
+		return
+	}
+	sorted := append([]Ticker(nil), rows...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].TradeValue > sorted[j].TradeValue
+	})
+	count := 0
+	for _, row := range sorted {
+		if row.TradeValue <= 0 {
+			continue
+		}
+		count++
+		fmt.Fprintf(b, "%d. %s(%s) %s\n", count, row.Name, row.Code, formatUnsignedWon(row.TradeValue))
+		if count >= limit {
+			break
+		}
+	}
+	if count == 0 {
+		b.WriteString("- 없음\n")
+	}
+}
+
+func appendFlowTopRanking(b *strings.Builder, market Market, rows []Flow, limit int) {
+	fmt.Fprintf(b, "[%s]\n", market)
+	appendFlowTopItems(b, fmt.Sprintf("연기금등 순매수 TOP %d", limit), rows, limit)
+	b.WriteString("\n")
+}
+
+func appendFlowTopItems(b *strings.Builder, title string, rows []Flow, limit int) {
+	fmt.Fprintf(b, "%s\n", title)
+	if len(rows) == 0 {
+		b.WriteString("- 없음\n")
+		return
+	}
+	sorted := append([]Flow(nil), rows...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].NetValue > sorted[j].NetValue
+	})
+	count := 0
+	for _, row := range sorted {
+		if row.NetValue <= 0 {
 			continue
 		}
 		count++
@@ -231,6 +362,9 @@ func helpMessage() string {
 /연기금 10일
 /연기금 20일
 /연기금 오늘 20
+/관심 오늘
+/거래대금 오늘
+/수급상위 오늘
 /종목 005930
 /종목 삼성전자
 /종목 005930 10일

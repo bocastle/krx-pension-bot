@@ -65,6 +65,67 @@ func TestClientFetchesAndParsesMarketFlows(t *testing.T) {
 	}
 }
 
+func TestClientFetchesAndParsesMarketTickers(t *testing.T) {
+	var formBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/comm/bldAttendant/getJsonData.cmd" {
+			t.Fatalf("path = %s, want KRX JSON endpoint", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm() error = %v", err)
+		}
+		if got := r.Form.Get("mktId"); got != "STK" {
+			t.Fatalf("mktId = %q, want STK", got)
+		}
+		if got := r.Form.Get("strtDd"); got != "20260526" {
+			t.Fatalf("strtDd = %q, want 20260526", got)
+		}
+		if got := r.Form.Get("endDd"); got != "20260526" {
+			t.Fatalf("endDd = %q, want 20260526", got)
+		}
+		if got := r.Form.Get("itmTpCd2"); got != "1" {
+			t.Fatalf("itmTpCd2 = %q, want 1", got)
+		}
+		if got := r.Form.Get("itmTpCd3"); got != "2" {
+			t.Fatalf("itmTpCd3 = %q, want 2", got)
+		}
+		formBody = r.Form.Encode()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"OutBlock_1": [
+				{
+					"ISU_CD": "005930",
+					"ISU_ABBRV": "삼성전자",
+					"ACC_TRDVOL": "31,234,567",
+					"ACC_TRDVAL": "2,000,000,000,000",
+					"CLSPRC": "64,900",
+					"FLUC_RT": "1.25"
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, 10*time.Minute)
+	rows, err := client.MarketTickers(context.Background(), report.MarketKOSPI, time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("MarketTickers() error = %v", err)
+	}
+
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if rows[0].Code != "005930" || rows[0].Name != "삼성전자" || rows[0].TradeValue != 2_000_000_000_000 {
+		t.Fatalf("row = %#v", rows[0])
+	}
+	if rows[0].TradeVolume != 31_234_567 || rows[0].ClosingPrice != 64_900 || rows[0].ChangeRate != 1.25 {
+		t.Fatalf("parsed numeric fields = %#v", rows[0])
+	}
+	if !strings.Contains(formBody, "bld=dbms%2FMDC_OUT%2FEASY%2Franking%2FMDCEASY01601_OUT") {
+		t.Fatalf("form body missing bld: %s", formBody)
+	}
+}
+
 func TestClientTreatsStringOutputAsEmptyRows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

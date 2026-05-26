@@ -16,28 +16,31 @@ import (
 
 const (
 	jsonPath             = "/comm/bldAttendant/getJsonData.cmd"
+	marketTickerBLD      = "dbms/MDC_OUT/EASY/ranking/MDCEASY01601_OUT"
 	netBuyByInvestorBLD  = "dbms/MDC_OUT/STAT/standard/MDCSTAT02401_OUT"
 	pensionInvestorCode  = "6000"
 	defaultClientTimeout = 10 * time.Second
 )
 
 type Client struct {
-	baseURL string
-	http    *http.Client
-	cache   *cache.Cache[string, []report.Flow]
+	baseURL     string
+	http        *http.Client
+	flowCache   *cache.Cache[string, []report.Flow]
+	tickerCache *cache.Cache[string, []report.Ticker]
 }
 
 func NewClient(baseURL string, ttl time.Duration) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		http:    &http.Client{Timeout: defaultClientTimeout},
-		cache:   cache.New[string, []report.Flow](ttl, time.Now),
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		http:        &http.Client{Timeout: defaultClientTimeout},
+		flowCache:   cache.New[string, []report.Flow](ttl, time.Now),
+		tickerCache: cache.New[string, []report.Ticker](ttl, time.Now),
 	}
 }
 
 func (c *Client) MarketFlows(ctx context.Context, market report.Market, period report.QueryPeriod) ([]report.Flow, error) {
 	key := fmt.Sprintf("%s:%s:%s", market, period.Start.Format("20060102"), period.End.Format("20060102"))
-	if rows, ok := c.cache.Get(key); ok {
+	if rows, ok := c.flowCache.Get(key); ok {
 		return rows, nil
 	}
 
@@ -77,7 +80,66 @@ func (c *Client) MarketFlows(ctx context.Context, market report.Market, period r
 	if len(rows) == 0 {
 		rows = parseRowsPayload(payload["block1"])
 	}
-	c.cache.Set(key, rows)
+	c.flowCache.Set(key, rows)
+	return rows, nil
+}
+
+func (c *Client) MarketTickers(ctx context.Context, market report.Market, date time.Time) ([]report.Ticker, error) {
+	key := fmt.Sprintf("ticker:%s:%s", market, date.Format("20060102"))
+	if rows, ok := c.tickerCache.Get(key); ok {
+		return rows, nil
+	}
+
+	form := url.Values{}
+	form.Set("bld", marketTickerBLD)
+	form.Set("locale", "ko_KR")
+	form.Set("mktId", marketCode(market))
+	if market == report.MarketKOSDAQ {
+		form.Set("segTpCd", "ALL")
+	}
+	form.Set("itmTpCd1", "N")
+	form.Set("itmTpCd2", "1")
+	form.Set("itmTpCd3", "2")
+	form.Set("stkprcTpCd", "Y")
+	form.Set("strtDd", date.Format("20060102"))
+	form.Set("endDd", date.Format("20060102"))
+	form.Set("share", "1")
+	form.Set("money", "1")
+	form.Set("csvxls_isNo", "false")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+jsonPath, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("Referer", "https://data.krx.co.kr/contents/MDC/MDI/outerLoader/index.cmd?screenId=MDCEASY016&locale=ko_KR")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("krx request failed: status %d", resp.StatusCode)
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	rows := parseTickerRowsPayload(payload["output"])
+	if len(rows) == 0 {
+		rows = parseTickerRowsPayload(payload["block1"])
+	}
+	if len(rows) == 0 {
+		rows = parseTickerRowsPayload(payload["OutBlock_1"])
+	}
+	c.tickerCache.Set(key, rows)
 	return rows, nil
 }
 
@@ -102,6 +164,18 @@ func parseRowsPayload(raw json.RawMessage) []report.Flow {
 	return parseRows(rows)
 }
 
+func parseTickerRowsPayload(raw json.RawMessage) []report.Ticker {
+	if len(raw) == 0 || string(raw) == `""` {
+		return nil
+	}
+
+	var rows []map[string]string
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil
+	}
+	return parseTickerRows(rows)
+}
+
 func parseRows(raw []map[string]string) []report.Flow {
 	rows := make([]report.Flow, 0, len(raw))
 	for _, item := range raw {
@@ -114,6 +188,24 @@ func parseRows(raw []map[string]string) []report.Flow {
 			SellValue:  parseNumber(pick(item, "ASK_TRDVAL", "ASK_TRD_VAL")),
 			BuyValue:   parseNumber(pick(item, "BID_TRDVAL", "BID_TRD_VAL")),
 			NetValue:   parseNumber(pick(item, "NETBID_TRDVAL", "NETBID_TRD_VAL")),
+		}
+		if row.Code != "" || row.Name != "" {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+func parseTickerRows(raw []map[string]string) []report.Ticker {
+	rows := make([]report.Ticker, 0, len(raw))
+	for _, item := range raw {
+		row := report.Ticker{
+			Code:         pick(item, "ISU_SRT_CD", "ISU_CD", "isuSrtCd"),
+			Name:         pick(item, "ISU_ABBRV", "ISU_NM", "isuAbbrv"),
+			TradeVolume:  parseNumber(pick(item, "ACC_TRDVOL", "ACC_TRD_VOL")),
+			TradeValue:   parseNumber(pick(item, "ACC_TRDVAL", "ACC_TRD_VAL")),
+			ChangeRate:   parseDecimal(pick(item, "FLUC_RT", "FLUCT_RT")),
+			ClosingPrice: parseNumber(pick(item, "TDD_CLSPRC", "CLSPRC")),
 		}
 		if row.Code != "" || row.Name != "" {
 			rows = append(rows, row)
@@ -137,6 +229,18 @@ func parseNumber(raw string) int64 {
 		return 0
 	}
 	value, err := strconv.ParseInt(cleaned, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func parseDecimal(raw string) float64 {
+	cleaned := strings.NewReplacer(",", "", "+", "", "%", "", " ", "").Replace(strings.TrimSpace(raw))
+	if cleaned == "" || cleaned == "-" {
+		return 0
+	}
+	value, err := strconv.ParseFloat(cleaned, 64)
 	if err != nil {
 		return 0
 	}

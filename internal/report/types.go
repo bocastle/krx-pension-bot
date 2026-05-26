@@ -29,6 +29,9 @@ const (
 	CommandHelp
 	CommandPension
 	CommandStock
+	CommandInterest
+	CommandTradingValue
+	CommandFlowTop
 )
 
 type Command struct {
@@ -50,6 +53,15 @@ type Flow struct {
 	NetValue   int64
 }
 
+type Ticker struct {
+	Code         string
+	Name         string
+	TradeVolume  int64
+	TradeValue   int64
+	ChangeRate   float64
+	ClosingPrice int64
+}
+
 type QueryPeriod struct {
 	Start time.Time
 	End   time.Time
@@ -58,4 +70,5 @@ type QueryPeriod struct {
 
 type Source interface {
 	MarketFlows(ctx context.Context, market Market, period QueryPeriod) ([]Flow, error)
+	MarketTickers(ctx context.Context, market Market, date time.Time) ([]Ticker, error)
 }
