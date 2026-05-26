@@ -1,6 +1,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,5 +37,41 @@ func TestLoadRequiresTelegramToken(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want missing token error")
+	}
+}
+
+func TestLoadReadsDotEnvFileWithoutOverridingExistingEnv(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, ".env"), []byte(strings.Join([]string{
+		"TELEGRAM_BOT_TOKEN=from-file",
+		"TELEGRAM_WEBHOOK_SECRET=file-secret",
+		"PUBLIC_BASE_URL=https://file.example.com/",
+		"CACHE_TTL_MINUTES=20",
+	}, "\n")), 0o600)
+	if err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Chdir(dir)
+	t.Setenv("TELEGRAM_BOT_TOKEN", "from-env")
+	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "")
+	t.Setenv("PUBLIC_BASE_URL", "")
+	t.Setenv("CACHE_TTL_MINUTES", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.TelegramBotToken != "from-env" {
+		t.Fatalf("TelegramBotToken = %q, want existing env value", cfg.TelegramBotToken)
+	}
+	if cfg.TelegramWebhookSecret != "file-secret" {
+		t.Fatalf("TelegramWebhookSecret = %q, want file value", cfg.TelegramWebhookSecret)
+	}
+	if cfg.PublicBaseURL != "https://file.example.com" {
+		t.Fatalf("PublicBaseURL = %q, want trimmed file value", cfg.PublicBaseURL)
+	}
+	if cfg.CacheTTL != 20*time.Minute {
+		t.Fatalf("CacheTTL = %v, want 20m", cfg.CacheTTL)
 	}
 }

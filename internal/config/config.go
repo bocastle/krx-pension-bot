@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bufio"
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +28,8 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	_ = loadDotEnv()
+
 	cfg := Config{
 		Port:                  getenv("PORT", defaultPort),
 		TelegramBotToken:      strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
@@ -66,4 +70,57 @@ func cacheTTL() time.Duration {
 		minutes = maxCacheTTLMinutes
 	}
 	return time.Duration(minutes) * time.Minute
+}
+
+func loadDotEnv() error {
+	path, ok := findDotEnv()
+	if !ok {
+		return nil
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if key == "" || strings.TrimSpace(os.Getenv(key)) != "" {
+			continue
+		}
+		_ = os.Setenv(key, value)
+	}
+	return scanner.Err()
+}
+
+func findDotEnv() (string, bool) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	for {
+		path := filepath.Join(dir, ".env")
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, true
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
