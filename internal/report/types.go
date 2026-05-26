@@ -34,6 +34,7 @@ type Command struct {
 	Kind   CommandKind
 	Period Period
 	Code   string
+	Query  string
 	Limit  int
 }
 

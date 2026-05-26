@@ -31,7 +31,7 @@ func (s *Service) HandleText(ctx context.Context, text string) (string, error) {
 	case CommandPension:
 		return s.PensionReport(ctx, cmd.Period, cmd.Limit, now)
 	case CommandStock:
-		return s.StockReport(ctx, cmd.Code, cmd.Period, now)
+		return s.StockReport(ctx, cmd.StockQuery(), cmd.Period, now)
 	default:
 		return unknownMessage(), nil
 	}
@@ -71,12 +71,31 @@ func (s *Service) StockReport(ctx context.Context, code string, period Period, n
 			return "", err
 		}
 		for _, row := range rows {
-			if row.Code == code {
+			if stockMatches(row, code) {
 				return formatStockReport(market, row, query), nil
 			}
 		}
 	}
 	return fmt.Sprintf("%s 종목을 %s 연기금등 수급 데이터에서 찾지 못했습니다.", code, query.Label), nil
+}
+
+func (c Command) StockQuery() string {
+	if c.Query != "" {
+		return c.Query
+	}
+	return c.Code
+}
+
+func stockMatches(row Flow, query string) bool {
+	normalizedQuery := normalizeStockQuery(query)
+	if normalizedQuery == "" {
+		return false
+	}
+	return normalizeStockQuery(row.Code) == normalizedQuery || normalizeStockQuery(row.Name) == normalizedQuery
+}
+
+func normalizeStockQuery(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), ""))
 }
 
 func BuildQueryPeriod(period Period, now time.Time) QueryPeriod {
@@ -210,7 +229,9 @@ func helpMessage() string {
 /연기금 20일
 /연기금 오늘 20
 /종목 005930
+/종목 삼성전자
 /종목 005930 20일
+삼성전자
 
 영문 명령어도 사용할 수 있습니다.
 /pension today

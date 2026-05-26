@@ -61,3 +61,23 @@ func TestStockReportFindsCodeAcrossMarkets(t *testing.T) {
 		t.Fatalf("stock report should not sign gross buy/sell values:\n%s", msg)
 	}
 }
+
+func TestStockReportFindsNameAcrossMarkets(t *testing.T) {
+	svc := NewService(fakeSource{rows: map[Market][]Flow{
+		MarketKOSPI: {
+			{Code: "005930", Name: "삼성전자", BuyValue: 20_000_000_000, SellValue: 7_700_000_000, NetValue: 12_300_000_000, NetVolume: 1000},
+		},
+		MarketKOSDAQ: {},
+	}}, time.FixedZone("KST", 9*60*60))
+
+	msg, err := svc.StockReport(context.Background(), "삼성전자", PeriodToday, time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("StockReport() error = %v", err)
+	}
+
+	for _, want := range []string{"005930", "삼성전자", "KOSPI", "+123.0억원"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("stock report missing %q:\n%s", want, msg)
+		}
+	}
+}

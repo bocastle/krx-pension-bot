@@ -19,6 +19,10 @@ func ParseCommand(text string) Command {
 		name = name[:at]
 	}
 
+	if !strings.HasPrefix(name, "/") && len(fields) == 1 {
+		return stockCommand(fields[0], PeriodToday)
+	}
+
 	switch name {
 	case "/start", "/시작":
 		if len(fields) == 1 {
@@ -59,8 +63,8 @@ func parseStock(args []string) Command {
 	if len(args) < 1 || len(args) > 2 {
 		return Command{Kind: CommandUnknown}
 	}
-	code := args[0]
-	if !stockCodePattern.MatchString(code) {
+	query := strings.TrimSpace(args[0])
+	if query == "" {
 		return Command{Kind: CommandUnknown}
 	}
 	period := PeriodToday
@@ -71,7 +75,14 @@ func parseStock(args []string) Command {
 		}
 		period = parsed
 	}
-	return Command{Kind: CommandStock, Code: code, Period: period}
+	return stockCommand(query, period)
+}
+
+func stockCommand(query string, period Period) Command {
+	if stockCodePattern.MatchString(query) {
+		return Command{Kind: CommandStock, Code: query, Period: period}
+	}
+	return Command{Kind: CommandStock, Query: query, Period: period}
 }
 
 func parsePeriod(raw string) (Period, bool) {
