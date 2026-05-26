@@ -60,7 +60,7 @@ func TestClientFetchesAndParsesMarketFlows(t *testing.T) {
 	if rows[0].Code != "005930" || rows[0].Name != "삼성전자" || rows[0].NetValue != 12_300_000_000 {
 		t.Fatalf("row = %#v", rows[0])
 	}
-	if !strings.Contains(formBody, "bld=dbms%2FMDC%2FSTAT%2Fstandard%2FMDCSTAT02401") {
+	if !strings.Contains(formBody, "bld=dbms%2FMDC_OUT%2FSTAT%2Fstandard%2FMDCSTAT02401_OUT") {
 		t.Fatalf("form body missing bld: %s", formBody)
 	}
 }
