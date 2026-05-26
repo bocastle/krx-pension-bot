@@ -308,14 +308,44 @@ func formatWon(value int64) string {
 		sign = "-"
 		value = -value
 	}
-	return fmt.Sprintf("%s%.1f억원", sign, float64(value)/100_000_000)
+	return sign + formatKoreanWon(value)
 }
 
 func formatUnsignedWon(value int64) string {
 	if value < 0 {
 		value = -value
 	}
-	return fmt.Sprintf("%.1f억원", float64(value)/100_000_000)
+	return formatKoreanWon(value)
+}
+
+func formatKoreanWon(value int64) string {
+	const trillion = int64(1_000_000_000_000)
+
+	jo := value / trillion
+	remainder := value % trillion
+	if jo == 0 {
+		return formatEok(remainder) + "억원"
+	}
+	if remainder == 0 {
+		return fmt.Sprintf("%d조원", jo)
+	}
+	return fmt.Sprintf("%d조 %s억원", jo, formatEok(remainder))
+}
+
+func formatEok(value int64) string {
+	return addCommaToDecimal(fmt.Sprintf("%.1f", float64(value)/100_000_000))
+}
+
+func addCommaToDecimal(value string) string {
+	parts := strings.SplitN(value, ".", 2)
+	integer := parts[0]
+	for i := len(integer) - 3; i > 0; i -= 3 {
+		integer = integer[:i] + "," + integer[i:]
+	}
+	if len(parts) == 1 {
+		return integer
+	}
+	return integer + "." + parts[1]
 }
 
 func formatInt(value int64) string {

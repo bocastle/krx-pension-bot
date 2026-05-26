@@ -112,9 +112,28 @@ func TestTradingValueReportShowsBothMarkets(t *testing.T) {
 		t.Fatalf("TradingValueReport() error = %v", err)
 	}
 
-	for _, want := range []string{"거래대금 상위", "KOSPI", "KOSDAQ", "삼성전자", "JYP Ent.", "20000.0억원"} {
+	for _, want := range []string{"거래대금 상위", "KOSPI", "KOSDAQ", "삼성전자", "JYP Ent.", "2조원"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("trading value report missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestFormatWonUsesReadableKoreanUnits(t *testing.T) {
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"under trillion", formatUnsignedWon(152_580_000_000), "1,525.8억원"},
+		{"exact trillion", formatUnsignedWon(2_000_000_000_000), "2조원"},
+		{"trillion with remainder", formatUnsignedWon(9_864_470_000_000), "9조 8,644.7억원"},
+		{"signed trillion", formatWon(-1_234_560_000_000), "-1조 2,345.6억원"},
+	}
+
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Fatalf("%s = %q, want %q", tt.name, tt.got, tt.want)
 		}
 	}
 }
