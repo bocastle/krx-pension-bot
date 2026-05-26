@@ -68,14 +68,14 @@ func (c *Client) MarketFlows(ctx context.Context, market report.Market, period r
 		return nil, fmt.Errorf("krx request failed: status %d", resp.StatusCode)
 	}
 
-	var payload map[string][]map[string]string
+	var payload map[string]json.RawMessage
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
 
-	rows := parseRows(payload["output"])
+	rows := parseRowsPayload(payload["output"])
 	if len(rows) == 0 {
-		rows = parseRows(payload["block1"])
+		rows = parseRowsPayload(payload["block1"])
 	}
 	c.cache.Set(key, rows)
 	return rows, nil
@@ -88,6 +88,18 @@ func marketCode(market report.Market) string {
 	default:
 		return "STK"
 	}
+}
+
+func parseRowsPayload(raw json.RawMessage) []report.Flow {
+	if len(raw) == 0 || string(raw) == `""` {
+		return nil
+	}
+
+	var rows []map[string]string
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil
+	}
+	return parseRows(rows)
 }
 
 func parseRows(raw []map[string]string) []report.Flow {

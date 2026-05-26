@@ -64,3 +64,23 @@ func TestClientFetchesAndParsesMarketFlows(t *testing.T) {
 		t.Fatalf("form body missing bld: %s", formBody)
 	}
 }
+
+func TestClientTreatsStringOutputAsEmptyRows(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output":"","CURRENT_DATETIME":"2026.05.26 PM 03:28:49"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, 10*time.Minute)
+	rows, err := client.MarketFlows(context.Background(), report.MarketKOSPI, report.QueryPeriod{
+		Start: time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("MarketFlows() error = %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("len(rows) = %d, want 0", len(rows))
+	}
+}
