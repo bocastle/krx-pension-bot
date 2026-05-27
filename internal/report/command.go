@@ -19,6 +19,14 @@ func ParseCommand(text string) Command {
 		name = name[:at]
 	}
 
+	if !strings.HasPrefix(name, "/") {
+		if isCommandKeyword(name) {
+			name = "/" + name
+		} else if len(fields) == 1 {
+			return stockCommand(fields[0], PeriodToday)
+		}
+	}
+
 	if !strings.HasPrefix(name, "/") && len(fields) == 1 {
 		return stockCommand(fields[0], PeriodToday)
 	}
@@ -52,6 +60,25 @@ func ParseCommand(text string) Command {
 		return parseSessionPerformance(fields[1:], CommandAfternoonPerformance)
 	}
 	return Command{Kind: CommandUnknown}
+}
+
+func isCommandKeyword(name string) bool {
+	switch name {
+	case "start", "시작",
+		"help", "도움말",
+		"pension", "연기금",
+		"stock", "종목",
+		"관심",
+		"거래대금",
+		"수급상위",
+		"시간외", "afterhours",
+		"신호", "signal",
+		"오전실적", "morning",
+		"오후실적", "afternoon":
+		return true
+	default:
+		return false
+	}
 }
 
 func parsePension(args []string) Command {

@@ -1101,51 +1101,53 @@ func sameDate(a, b time.Time) bool {
 }
 
 func startMessage() string {
-	return "KRX 주식 봇입니다.\n현재는 KRX 연기금등 수급 리포트를 제공합니다.\n/help 명령어로 사용법을 확인하세요.\n\n연기금등은 국민연금 단독 매매가 아니라 KRX 투자자 분류상 연기금등 집계입니다."
+	return "KRX 주식 봇입니다.\n현재는 KRX 연기금등 수급 리포트를 제공합니다.\n도움말 또는 /help 를 입력해 사용법을 확인하세요.\n\n연기금등은 국민연금 단독 매매가 아니라 KRX 투자자 분류상 연기금등 집계입니다."
 }
 
 func helpMessage() string {
 	return strings.TrimSpace(`사용 가능한 명령어
-/연기금 오늘
-/연기금 5일
-/연기금 10일
-/연기금 20일
-/연기금 오늘 20
-/관심 오늘
-/거래대금 오늘
-/수급상위 오늘
-/시간외 급등
-/시간외 급등 20
-/신호 오늘
-/신호 삼성전자
-/오전실적 오늘
-/오후실적 오늘
-/종목 005930
-/종목 삼성전자
-/종목 삼전
-/종목 하이닉스
-/종목 카뱅
-/종목 두산에너
-/종목 005930 10일
-/종목 005930 20일
+슬래시 없이 입력해도 됩니다.
+
+연기금 오늘
+연기금 5일
+연기금 10일
+연기금 20일
+연기금 오늘 20
+관심 오늘
+거래대금 오늘
+수급상위 오늘
+시간외 급등
+시간외 급등 20
+신호 오늘
+신호 삼성전자
+오전실적 오늘
+오후실적 오늘
+종목 005930
+종목 삼성전자
+종목 삼전
+종목 하이닉스
+종목 카뱅
+종목 두산에너
+종목 005930 10일
+종목 005930 20일
 삼성전자
 
 영문 명령어도 사용할 수 있습니다.
-/pension today
-/pension 5d
-/pension 10d
-/pension 20d
-/pension today 20
-/stock 005930
-/stock 005930 20d
-/afterhours up
-/signal today
-/morning today
-/afternoon today
+pension today
+pension 5d
+pension 10d
+pension 20d
+pension today 20
+stock 005930
+stock 005930 20d
+afterhours up
+signal today
+morning today
+afternoon today
 
 조회 결과는 투자 참고용이며 매매 추천이 아닙니다.`)
 }
 
 func unknownMessage() string {
-	return "알 수 없는 명령어입니다. /help 를 입력해 사용 가능한 명령어를 확인하세요."
+	return "알 수 없는 명령어입니다. 도움말 또는 /help 를 입력해 사용 가능한 명령어를 확인하세요."
 }
